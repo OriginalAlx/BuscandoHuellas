@@ -33,7 +33,7 @@ import com.app.buscandohuellas.ui.screens.register.RegisterScreen
 import com.app.buscandohuellas.ui.theme.BuscandoHuellasTheme
 import dagger.hilt.android.AndroidEntryPoint
 
-// Código de Deep Links eliminado - confirmación de email desactivada en Supabase
+
 @AndroidEntryPoint
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -109,12 +109,12 @@ fun AppNavHost(navController: NavHostController = rememberNavController()) {
             HomeScreen(
                 onNavigateToCreateReport = { navController.navigate("create_report") },
                 onReportClick = { reportId ->
-                    // TODO: navegar al detalle del reporte cuando exista la pantalla
-                    // navController.navigate("report_detail/$reportId")
+                    
+                    
                 },
                 onProfileClick = {
-                    // TODO: navegar a "editar perfil" cuando exista la pantalla
-                    // navController.navigate("edit_profile")
+                    
+                    
                 },
                 onLogout = {
                     navController.navigate("login") {

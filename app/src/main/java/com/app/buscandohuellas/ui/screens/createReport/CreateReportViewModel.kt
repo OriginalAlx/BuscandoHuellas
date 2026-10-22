@@ -23,10 +23,7 @@ import java.io.File
 import java.io.FileOutputStream
 import javax.inject.Inject
 
-/**
- * Estado de la pantalla de creación de reporte.
- * Se usa `sealed interface` siguiendo la convención del proyecto (RegisterStatus).
- */
+
 sealed interface CreateReportUiState {
     data object Idle : CreateReportUiState
     data object Loading : CreateReportUiState
@@ -40,7 +37,7 @@ class CreateReportViewModel @Inject constructor(
     @ApplicationContext private val context: Context
 ) : ViewModel() {
 
-    // Cliente de ubicación creado internamente con el contexto de aplicación.
+    
     private val fusedLocationClient: FusedLocationProviderClient =
         LocationServices.getFusedLocationProviderClient(context)
 
@@ -62,7 +59,7 @@ class CreateReportViewModel @Inject constructor(
     private val _isLocationLoading = MutableStateFlow(false)
     val isLocationLoading: StateFlow<Boolean> = _isLocationLoading.asStateFlow()
 
-    // --- Imagen ---
+    
     private val _selectedImageUri = MutableStateFlow<Uri?>(null)
     val selectedImageUri: StateFlow<Uri?> = _selectedImageUri.asStateFlow()
 
@@ -72,7 +69,7 @@ class CreateReportViewModel @Inject constructor(
     private val _uploadedImageUrl = MutableStateFlow<String?>(null)
     val uploadedImageUrl: StateFlow<String?> = _uploadedImageUrl.asStateFlow()
 
-    // --- Selector de ubicación en mapa ---
+    
     private val _isMapPickerOpen = MutableStateFlow(false)
     val isMapPickerOpen: StateFlow<Boolean> = _isMapPickerOpen.asStateFlow()
 
@@ -85,10 +82,7 @@ class CreateReportViewModel @Inject constructor(
         _description.value = value
     }
 
-    /**
-     * Obtiene la última ubicación conocida. Requiere que el permiso
-     * ACCESS_FINE_LOCATION ya esté concedido (lo gestiona la UI).
-     */
+    
     @SuppressLint("MissingPermission")
     fun getCurrentLocation() {
         _isLocationLoading.value = true
@@ -120,32 +114,25 @@ class CreateReportViewModel @Inject constructor(
         }
     }
 
-    /** La UI avisa cuando el usuario rechaza el permiso de ubicación. */
+    
     fun onLocationPermissionDenied() {
         _uiState.value = CreateReportUiState.Error(
             "Necesitas conceder el permiso de ubicación para publicar el reporte."
         )
     }
 
-    // ------------------------------------------------------------------
-    // Selector de ubicación en mapa (MapPickerScreen)
-    // ------------------------------------------------------------------
-
-    /** Abre la pantalla de selección de ubicación en el mapa. */
+    
     fun openMapPicker() {
         clearError()
         _isMapPickerOpen.value = true
     }
 
-    /** Cierra la pantalla del mapa sin modificar las coordenadas. */
+    
     fun closeMapPicker() {
         _isMapPickerOpen.value = false
     }
 
-    /**
-     * Llamado por MapPickerScreen cuando el usuario confirma una ubicación.
-     * Actualiza los StateFlows de latitud/longitud y cierra el selector.
-     */
+    
     fun onMapLocationSelected(latitude: Double, longitude: Double) {
         _latitude.value = latitude
         _longitude.value = longitude
@@ -153,29 +140,20 @@ class CreateReportViewModel @Inject constructor(
         clearError()
     }
 
-    /**
-     * Preparado para el launcher de galería. La UI invoca el ActivityResultLauncher.
-     * Este método queda para mantener la API solicitada (no sube aún).
-     */
+    
     fun selectImageFromGallery() {
-        // La selección se gestiona en la UI con rememberLauncherForActivityResult
+        
         clearError()
     }
 
-    /**
-     * Llamado desde la UI al obtener un Uri de galería o tras guardar la foto de cámara.
-     * Inicia la subida a Supabase Storage.
-     */
+    
     fun onImageSelected(uri: Uri) {
         _selectedImageUri.value = uri
         _uploadedImageUrl.value = null
         uploadImageToStorage(uri)
     }
 
-    /**
-     * Llamado desde la UI al obtener un Bitmap de TakePicturePreview.
-     * Guarda el bitmap en caché y lo sube a Supabase Storage.
-     */
+    
     fun onImageCaptured(bitmap: Bitmap) {
         viewModelScope.launch {
             try {
@@ -196,11 +174,7 @@ class CreateReportViewModel @Inject constructor(
         }
     }
 
-    /**
-     * Sube la imagen a Supabase Storage (bucket: "pet-reports").
-     * Genera un nombre único con timestamp y UUID.
-     * Valida tamaño máximo 5MB. Actualiza selectedImageUri con la URL pública.
-     */
+    
     fun uploadImageToStorage(uri: Uri) {
         viewModelScope.launch {
             _isUploadingImage.value = true
@@ -213,7 +187,7 @@ class CreateReportViewModel @Inject constructor(
 
                 val bytes = inputStream.use { it.readBytes() }
 
-                // Validar tamaño máximo 5MB
+                
                 val maxSizeBytes = 5 * 1024 * 1024
                 if (bytes.size > maxSizeBytes) {
                     _isUploadingImage.value = false
@@ -224,7 +198,7 @@ class CreateReportViewModel @Inject constructor(
                     return@launch
                 }
 
-                // Obtener extensión a partir del MIME type
+                
                 val mimeType = contentResolver.getType(uri)
                 val extension = when (mimeType) {
                     "image/png" -> "png"
@@ -233,7 +207,7 @@ class CreateReportViewModel @Inject constructor(
                     "image/bmp" -> "bmp"
                     "image/jpeg", "image/jpg" -> "jpg"
                     else -> {
-                        // Intentar obtener extensión del URI
+                        
                         val path = uri.lastPathSegment.orEmpty()
                         if (path.contains(".")) {
                             path.substringAfterLast(".").lowercase().ifBlank { "jpg" }
@@ -246,7 +220,7 @@ class CreateReportViewModel @Inject constructor(
                 reportRepository.uploadReportImage(bytes, extension)
                     .onSuccess { publicUrl ->
                         _uploadedImageUrl.value = publicUrl
-                        // Actualiza selectedImageUri con la URL obtenida (según especificación)
+                        
                         _selectedImageUri.value = Uri.parse(publicUrl)
                         _isUploadingImage.value = false
                     }
@@ -270,7 +244,7 @@ class CreateReportViewModel @Inject constructor(
         }
     }
 
-    /** Elimina la imagen seleccionada (local) y borra del storage si ya fue subida. */
+    
     fun clearImage() {
         val urlToDelete = _uploadedImageUrl.value
         _selectedImageUri.value = null
@@ -280,7 +254,7 @@ class CreateReportViewModel @Inject constructor(
             clearError()
         }
 
-        // Operación best-effort: eliminar del storage en segundo plano
+        
         if (urlToDelete != null) {
             viewModelScope.launch {
                 reportRepository.deleteReportImage(urlToDelete)
@@ -304,7 +278,7 @@ class CreateReportViewModel @Inject constructor(
             return
         }
 
-        // Si hay una imagen seleccionada pero aún se está subiendo, esperar
+        
         if (_isUploadingImage.value) {
             _uiState.value = CreateReportUiState.Error("Espera a que la imagen termine de subir.")
             return
@@ -313,7 +287,7 @@ class CreateReportViewModel @Inject constructor(
         viewModelScope.launch {
             _uiState.value = CreateReportUiState.Loading
 
-            // El repositorio sobrescribe userId con el de la sesión autenticada.
+            
             val report = Report(
                 userId = "",
                 petName = petName,

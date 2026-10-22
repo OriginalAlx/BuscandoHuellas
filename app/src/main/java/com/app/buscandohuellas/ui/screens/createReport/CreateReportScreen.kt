@@ -72,42 +72,7 @@ import coil.request.ImageRequest
 import kotlinx.coroutines.launch
 import java.util.Locale
 
-/**
- * ============================================================================
- * CÓMO INTEGRAR ESTA PANTALLA (Objetivo 2 + geolocalización del Objetivo 3)
- * ============================================================================
- *
- * 1) En el NavHost de MainActivity.kt agrega el destino:
- *
- *      import com.app.buscandohuellas.ui.screens.createReport.CreateReportScreen
- *      ...
- *      composable("create_report") {
- *          CreateReportScreen(
- *              onReportCreated = { navController.popBackStack() },
- *              onNavigateBack = { navController.popBackStack() }
- *          )
- *      }
- *
- * 2) En la pantalla Home añade un FloatingActionButton que navegue:
- *
- *      Scaffold(
- *          floatingActionButton = {
- *              FloatingActionButton(onClick = { navController.navigate("create_report") }) {
- *                  Icon(Icons.Filled.Add, contentDescription = "Nuevo reporte")
- *              }
- *          }
- *      ) { padding -> /* contenido Home */ }
- *
- * 3) Permisos: ya declarados en AndroidManifest.xml
- *      <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION" />
- *      <uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION" />
- *      <uses-permission android:name="android.permission.CAMERA" />
- *      <uses-permission android:name="android.permission.READ_EXTERNAL_STORAGE" android:maxSdkVersion="32" />
- *      <uses-permission android:name="android.permission.READ_MEDIA_IMAGES" />
- *
- * 4) Supabase Storage: crear bucket "pet-reports" (público) en Storage del proyecto.
- * ============================================================================
- */
+
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun CreateReportScreen(
@@ -128,7 +93,7 @@ fun CreateReportScreen(
     val context = LocalContext.current
     val snackbarHostState = remember { SnackbarHostState() }
     val scope = androidx.compose.runtime.rememberCoroutineScope()
-    // Permiso de ubicación: se pide antes de consultar el FusedLocationProviderClient.
+    
     val permissionLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.RequestPermission()
     ) { granted ->
@@ -139,7 +104,7 @@ fun CreateReportScreen(
         }
     }
 
-    // Galería: ActivityResultContracts.GetContent() (SAF, no requiere permisos en API >= 19)
+    
     val galleryLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.GetContent()
     ) { uri ->
@@ -148,7 +113,7 @@ fun CreateReportScreen(
         }
     }
 
-    // Cámara: ActivityResultContracts.TakePicturePreview() (thumbnail)
+    
     val cameraLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.TakePicturePreview()
     ) { bitmap: Bitmap? ->
@@ -157,7 +122,7 @@ fun CreateReportScreen(
         }
     }
 
-    // Permiso de cámara
+    
     val cameraPermissionLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.RequestPermission()
     ) { granted ->
@@ -168,14 +133,14 @@ fun CreateReportScreen(
         }
     }
 
-    // Al publicar con éxito se navega de vuelta.
+    
     LaunchedEffect(uiState) {
         if (uiState is CreateReportUiState.Success) {
             onReportCreated()
         }
     }
 
-    // Errores amigables vía Snackbar.
+    
     val errorMessage = (uiState as? CreateReportUiState.Error)?.message
     LaunchedEffect(errorMessage) {
         if (errorMessage != null) {
@@ -257,7 +222,7 @@ fun CreateReportScreen(
                 onSelectOnMap = { viewModel.openMapPicker() }
             )
 
-            // Sección de foto
+            
             PhotoSection(
                 imageUri = selectedImageUri,
                 isUploading = isUploadingImage,
@@ -306,10 +271,7 @@ fun CreateReportScreen(
         }
     }
 
-    // ------------------------------------------------------------------
-    // Overlay a pantalla completa: selector de ubicación en el mapa.
-    // Se dibuja por encima del formulario cuando isMapPickerOpen vale true.
-    // ------------------------------------------------------------------
+    
     if (isMapPickerOpen) {
         MapPickerScreen(
             initialLatitude = latitude,
@@ -318,7 +280,7 @@ fun CreateReportScreen(
             currentLongitude = longitude,
             isLocating = isLocationLoading,
             onUseCurrentLocation = {
-                // Reutiliza el mismo flujo de permisos del botón "Obtener mi ubicación actual".
+                
                 val locationGranted = ContextCompat.checkSelfPermission(
                     context,
                     Manifest.permission.ACCESS_FINE_LOCATION
@@ -373,7 +335,7 @@ private fun LocationSection(
                     )
                 }
             } else {
-                // Botón principal: obtener la ubicación con FusedLocationProviderClient.
+                
                 Button(
                     onClick = onRequestLocation,
                     modifier = Modifier.fillMaxWidth()
@@ -387,7 +349,7 @@ private fun LocationSection(
                 }
             }
 
-            // Botón secundario: abrir el selector de ubicación en el mapa.
+            
             OutlinedButton(
                 onClick = onSelectOnMap,
                 enabled = !isLocationLoading,
@@ -401,7 +363,7 @@ private fun LocationSection(
                 Text("Seleccionar en mapa")
             }
 
-            // Coordenadas actuales (obtenidas por GPS o confirmadas en el mapa).
+            
             if (latitude != null && longitude != null) {
                 Row(
                     verticalAlignment = Alignment.CenterVertically,
@@ -441,7 +403,7 @@ private fun PhotoSection(
         )
 
         if (imageUri == null) {
-            // Sin imagen: borde punteado con opción de añadir foto
+            
             Card(
                 modifier = Modifier.fillMaxWidth(),
                 shape = RoundedCornerShape(12.dp)
@@ -508,7 +470,7 @@ expanded = menuExpanded.value,
                 }
             }
         } else {
-            // Con imagen seleccionada
+            
             Box(
                 modifier = Modifier
                     .fillMaxWidth()
@@ -525,7 +487,7 @@ expanded = menuExpanded.value,
                     modifier = Modifier.fillMaxSize()
                 )
 
-                // Overlay con botón eliminar
+                
                 if (enabled) {
                     IconButton(
                         onClick = onRemovePhoto,
@@ -546,7 +508,7 @@ expanded = menuExpanded.value,
                     }
                 }
 
-                // Indicador de carga si se está subiendo
+                
                 if (isUploading) {
                     Box(
                         modifier = Modifier
@@ -570,7 +532,7 @@ expanded = menuExpanded.value,
             }
         }
 
-        // Barra de progreso durante la subida
+        
         if (isUploading) {
             LinearProgressIndicator(modifier = Modifier.fillMaxWidth())
         }
@@ -579,10 +541,7 @@ expanded = menuExpanded.value,
 
 private fun formatCoordinate(value: Double): String = "%.4f".format(Locale.US, value)
 
-/**
- * Borde punteado (Compose no lo trae de serie): se dibuja un contorno redondeado
- * con un PathEffect de guiones.
- */
+
 private fun Modifier.dashedBorder(
     color: Color,
     strokeWidth: Dp = 1.dp,

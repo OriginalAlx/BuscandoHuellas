@@ -56,7 +56,7 @@ import androidx.hilt.lifecycle.viewmodel.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.app.buscandohuellas.domain.model.User
 
-// Código de Deep Links eliminado - confirmación de email desactivada en Supabase
+
 @Composable
 fun RegisterScreen(
     onRegisterSuccess: (User) -> Unit,
@@ -310,9 +310,7 @@ fun RegisterScreen(
                     )
                 }
 
-                // Mensaje de éxito tras el registro. Con la confirmación de email
-                // desactivada en Supabase la sesión se crea al instante y se navega
-                // directamente, por lo que este texto se muestra solo un instante.
+                
                 AnimatedVisibility(
                     visible = uiState.registeredUser != null,
                     enter = fadeIn() + expandVertically(),

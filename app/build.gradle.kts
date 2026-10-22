@@ -6,8 +6,7 @@ plugins {
     alias(libs.plugins.hilt)
 }
 
-// Lee local.properties para obtener la API Key de Google Maps.
-// En local.properties añadir: MAPS_API_KEY=TU_API_KEY
+
 import java.util.Properties
 
 val localProperties = Properties()
@@ -31,7 +30,7 @@ android {
         versionCode = 1
         versionName = "1.0"
 
-        // API Key de Google Maps inyectada al manifest desde local.properties
+        
         manifestPlaceholders["MAPS_API_KEY"] = mapsApiKey
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
@@ -71,7 +70,7 @@ dependencies {
     implementation(libs.supabase.auth)
     implementation(libs.supabase.storage)
     implementation(libs.supabase.realtime)
-    // Ktor usando el catálogo de versiones
+    
     implementation(libs.ktor.client.android)
     implementation(libs.kotlinx.serialization.json)
     implementation(libs.hilt.android)
@@ -81,9 +80,9 @@ dependencies {
     implementation(libs.androidx.navigation.compose)
     implementation(libs.androidx.compose.material.icons.extended)
     implementation(libs.play.services.location)
-    // Coil para previsualización de imágenes seleccionadas desde galería/cámara
+    
     implementation("io.coil-kt:coil-compose:2.6.0")
-    // Google Maps Compose para el selector de ubicación en mapa
+    
     implementation("com.google.maps.android:maps-compose:4.3.0")
     implementation("com.google.android.gms:play-services-maps:18.2.0")
     testImplementation(libs.junit)

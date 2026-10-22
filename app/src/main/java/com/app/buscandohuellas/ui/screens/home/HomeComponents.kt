@@ -54,11 +54,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.app.buscandohuellas.ui.theme.BrandColors
 
-// =====================================================================
-// ESTADO Y MODELOS DE UI
-// =====================================================================
 
-/** Tabs del BottomNavigation, en el orden del diseño. */
 enum class HomeTab(val label: String) {
     HOME("Inicio"),
     MAP("Mapa"),
@@ -66,25 +62,25 @@ enum class HomeTab(val label: String) {
     PROFILE("Perfil")
 }
 
-/** Opciones de filtro de la pantalla de Alertas. */
+
 enum class AlertFilter(val label: String) {
     ALL("Todas"),
     UNREAD("Sin leer")
 }
 
-/** Estado de un reporte de mascota. */
+
 enum class PetReportStatus {
     LOST,
     FOUND
 }
 
-/** Tipo de alerta, decide icono y color del contenedor. */
+
 enum class AlertKind {
     INFO,
     FOUND
 }
 
-/** Opciones del menú de Perfil. */
+
 enum class ProfileMenuItem(
     val title: String,
     val icon: ImageVector,
@@ -95,7 +91,7 @@ enum class ProfileMenuItem(
     LOGOUT("Cerrar sesión", Icons.AutoMirrored.Filled.ExitToApp, isDestructive = true)
 }
 
-/** Modelo de UI de una tarjeta de reporte reciente. */
+
 data class RecentReport(
     val id: String,
     val petName: String,
@@ -104,7 +100,7 @@ data class RecentReport(
     val status: PetReportStatus
 )
 
-/** Modelo de UI de una alerta. */
+
 data class AlertItemUi(
     val id: String,
     val title: String,
@@ -114,7 +110,7 @@ data class AlertItemUi(
     val isUnread: Boolean
 )
 
-/** Modelo de UI del perfil de usuario. */
+
 data class UserProfileUi(
     val fullName: String = "",
     val email: String = "",
@@ -122,7 +118,7 @@ data class UserProfileUi(
     val contributionsCount: Int = 0,
     val reunionsCount: Int = 0
 ) {
-    /** Iniciales para el avatar (p. ej. "Camila Rodríguez" -> "CR"). */
+    
     val initials: String
         get() {
             val source = fullName.trim().ifBlank { email.substringBefore('@') }
@@ -135,7 +131,7 @@ data class UserProfileUi(
         }
 }
 
-/** Estado inmutable de la pantalla principal. */
+
 data class HomeUiState(
     val selectedTab: HomeTab = HomeTab.HOME,
     val nearbyAlertsCount: Int = 0,
@@ -144,20 +140,20 @@ data class HomeUiState(
     val alertsFilter: AlertFilter = AlertFilter.ALL,
     val profile: UserProfileUi = UserProfileUi()
 ) {
-    /** Alertas visibles según el filtro seleccionado. */
+    
     val visibleAlerts: List<AlertItemUi>
         get() = if (alertsFilter == AlertFilter.UNREAD) alerts.filter { it.isUnread } else alerts
 
-    /** Número de alertas sin leer (badge del BottomNavigation). */
+    
     val unreadAlertsCount: Int
         get() = alerts.count { it.isUnread }
 
-    /** Primer nombre del usuario, para el saludo "Hola, ...". */
+    
     val firstName: String
         get() = profile.fullName.substringBefore(' ').ifBlank { "usuario" }
 }
 
-/** Dummy data basada en los diseños, para previsualizar sin backend. */
+
 fun dummyHomeUiState(): HomeUiState = HomeUiState(
     selectedTab = HomeTab.HOME,
     nearbyAlertsCount = 2,
@@ -209,11 +205,7 @@ fun dummyHomeUiState(): HomeUiState = HomeUiState(
     )
 )
 
-// =====================================================================
-// COMPONENTES REUTILIZABLES
-// =====================================================================
 
-/** Avatar circular con iniciales (o foto real más adelante). */
 @Composable
 fun UserAvatar(
     initials: String,
@@ -238,11 +230,11 @@ fun UserAvatar(
             fontWeight = FontWeight.Bold,
             fontSize = (size.value / 2.6f).sp
         )
-        // TODO: Reemplazar por AsyncImage (Coil) con la foto real del perfil
+        
     }
 }
 
-/** Banner superior "Tienes N alertas cercanas". */
+
 @Composable
 fun NearbyAlertsBanner(count: Int, onClick: () -> Unit, modifier: Modifier = Modifier) {
     Surface(
@@ -303,7 +295,7 @@ fun NearbyAlertsBanner(count: Int, onClick: () -> Unit, modifier: Modifier = Mod
     }
 }
 
-/** Encabezado de sección con overline, título y acción opcional. */
+
 @Composable
 fun SectionHeader(
     title: String,
@@ -345,7 +337,7 @@ fun SectionHeader(
     }
 }
 
-/** Estado vacío reutilizable (sin datos todavía en la base de datos). */
+
 @Composable
 fun EmptyState(
     icon: ImageVector,
@@ -392,7 +384,7 @@ fun EmptyState(
     }
 }
 
-/** Placeholder cuadrado de la foto de la mascota. */
+
 @Composable
 fun PetPhotoPlaceholder(size: Dp = 56.dp, modifier: Modifier = Modifier) {
     Box(
@@ -408,11 +400,11 @@ fun PetPhotoPlaceholder(size: Dp = 56.dp, modifier: Modifier = Modifier) {
             tint = BrandColors.Primary,
             modifier = Modifier.size(size / 2.5f)
         )
-        // TODO: Reemplazar por AsyncImage (Coil) con la foto de la mascota
+        
     }
 }
 
-/** Chip de estado: PERDIDA (rojo) / ENCONTRADA (verde). */
+
 @Composable
 fun ReportStatusChip(status: PetReportStatus, modifier: Modifier = Modifier) {
     val isLost = status == PetReportStatus.LOST
@@ -439,7 +431,7 @@ fun ReportStatusChip(status: PetReportStatus, modifier: Modifier = Modifier) {
     }
 }
 
-/** Tarjeta de reporte reciente (lista "Reportes recientes"). */
+
 @Composable
 fun PetReportCard(
     report: RecentReport,
@@ -512,7 +504,7 @@ fun PetReportCard(
     }
 }
 
-/** Chip de filtro seleccionable (Alertas). */
+
 @Composable
 fun AlertFilterChip(
     label: String,
@@ -535,7 +527,7 @@ fun AlertFilterChip(
     }
 }
 
-/** Tarjeta de alerta. */
+
 @Composable
 fun AlertCard(alert: AlertItemUi, onClick: () -> Unit, modifier: Modifier = Modifier) {
     val isFound = alert.kind == AlertKind.FOUND
@@ -608,7 +600,7 @@ fun AlertCard(alert: AlertItemUi, onClick: () -> Unit, modifier: Modifier = Modi
     }
 }
 
-/** Contador de estadísticas del perfil. */
+
 @Composable
 fun ProfileStatItem(value: String, label: String, modifier: Modifier = Modifier) {
     Column(
@@ -629,7 +621,7 @@ fun ProfileStatItem(value: String, label: String, modifier: Modifier = Modifier)
     }
 }
 
-/** Fila de opción del menú de perfil. */
+
 @Composable
 fun ProfileMenuRow(item: ProfileMenuItem, onClick: () -> Unit, modifier: Modifier = Modifier) {
     val iconTint = if (item.isDestructive) BrandColors.Accent else BrandColors.Primary
@@ -677,11 +669,7 @@ fun ProfileMenuRow(item: ProfileMenuItem, onClick: () -> Unit, modifier: Modifie
     }
 }
 
-// =====================================================================
-// MAPA
-// =====================================================================
 
-/** FAB extendido "Reportar" (color de acento), usado en la pestaña Mapa. */
 @Composable
 fun MapReportFab(onClick: () -> Unit, modifier: Modifier = Modifier) {
     ExtendedFloatingActionButton(
@@ -706,7 +694,7 @@ fun MapReportFab(onClick: () -> Unit, modifier: Modifier = Modifier) {
     }
 }
 
-/** Botón circular blanco para recentrar el mapa. */
+
 @Composable
 fun MapRecenterButton(onClick: () -> Unit, modifier: Modifier = Modifier) {
     Box(
@@ -727,7 +715,7 @@ fun MapRecenterButton(onClick: () -> Unit, modifier: Modifier = Modifier) {
     }
 }
 
-/** Etiqueta flotante del radio de búsqueda. */
+
 @Composable
 fun MapRadiusChip(text: String, modifier: Modifier = Modifier) {
     Box(
@@ -744,7 +732,7 @@ fun MapRadiusChip(text: String, modifier: Modifier = Modifier) {
     }
 }
 
-/** Marcador circular con huella sobre el mapa. */
+
 @Composable
 fun MapMarker(color: Color, modifier: Modifier = Modifier, size: Dp = 40.dp) {
     Box(
@@ -764,10 +752,7 @@ fun MapMarker(color: Color, modifier: Modifier = Modifier, size: Dp = 40.dp) {
     }
 }
 
-/**
- * Placeholder del mapa. Mantiene la composición del diseño (círculo de radio,
- * marcadores y etiqueta del río) hasta integrar el SDK real.
- */
+
 @Composable
 fun MapPlaceholder(modifier: Modifier = Modifier) {
     Box(
@@ -775,10 +760,8 @@ fun MapPlaceholder(modifier: Modifier = Modifier) {
             .fillMaxSize()
             .background(BrandColors.MapBackground)
     ) {
-        // TODO: Integrar Google Maps Compose (com.google.maps.android:maps-compose)
-        // y sustituir este Box por el GoogleMap real.
-
-        // Leyenda "Encontrados"
+        
+        
         Row(
             modifier = Modifier
                 .align(Alignment.TopStart)
@@ -802,7 +785,7 @@ fun MapPlaceholder(modifier: Modifier = Modifier) {
             )
         }
 
-        // Círculo del radio de búsqueda
+        
         Box(
             modifier = Modifier
                 .align(Alignment.Center)
@@ -816,7 +799,7 @@ fun MapPlaceholder(modifier: Modifier = Modifier) {
                 )
         )
 
-        // Marcadores sobre el círculo
+        
         MapMarker(
             color = BrandColors.Accent,
             modifier = Modifier.align(Alignment.TopCenter).padding(top = 120.dp)
@@ -830,7 +813,7 @@ fun MapPlaceholder(modifier: Modifier = Modifier) {
             modifier = Modifier.align(Alignment.BottomCenter).padding(bottom = 150.dp)
         )
 
-        // Etiqueta del río
+        
         Text(
             text = "RÍO VERDE",
             style = MaterialTheme.typography.labelSmall,
@@ -841,7 +824,7 @@ fun MapPlaceholder(modifier: Modifier = Modifier) {
                 .padding(end = 24.dp)
         )
 
-        // Etiqueta del radio
+        
         MapRadiusChip(
             text = "Radio de 2 km",
             modifier = Modifier
@@ -851,17 +834,10 @@ fun MapPlaceholder(modifier: Modifier = Modifier) {
     }
 }
 
-// =====================================================================
-// BOTTOM NAVIGATION
-// =====================================================================
 
-/** Item del BottomNavigation (tab + imagen). */
 data class BottomNavItem(val tab: HomeTab, val icon: ImageVector)
 
-/**
- * Barra inferior con 4 ítems: Inicio, Mapa, Alertas y Perfil.
- * El ítem de Alertas muestra un badge con las alertas sin leer.
- */
+
 @Composable
 fun AppBottomNavigationBar(
     selectedTab: HomeTab,
@@ -925,7 +901,7 @@ fun AppBottomNavigationBar(
     }
 }
 
-/** Separador vertical usado en la tarjeta de estadísticas del perfil. */
+
 @Composable
 fun StatsDivider(modifier: Modifier = Modifier) {
     VerticalDivider(

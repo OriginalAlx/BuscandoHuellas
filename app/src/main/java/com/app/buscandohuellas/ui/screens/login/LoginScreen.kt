@@ -49,46 +49,7 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.app.buscandohuellas.R
 import com.app.buscandohuellas.domain.model.User
 
-/*
- * ============================================================================
- * CÓMO USAR LoginScreen DESDE EL NavHost DE MainActivity.kt
- * ============================================================================
- *
- * 1. Dentro del NavHost de MainActivity, agrega el destino:
- *
- *      composable("login") {
- *          LoginScreen(
- *              onLoginSuccess = { user ->
- *                  val destino = if (user.role == "MODERATOR") {
- *                      "moderator_dashboard"
- *                  } else {
- *                      "home"
- *                  }
- *                  navController.navigate(destino) {
- *                      popUpTo("login") { inclusive = true }
- *                  }
- *              },
- *              onNavigateToRegister = { navController.navigate("register") }
- *          )
- *      }
- *
- * 2. Para abrir esta pantalla en cualquier punto:
- *
- *      navController.navigate("login")
- *
- *    Si la app debe pedir sesión al iniciar, usa "login" como
- *    startDestination del NavHost.
- *
- * 3. onLoginSuccess recibe el modelo User (id, email, role) obtenido de la
- *    tabla "users" después de autenticar con Supabase Auth, por lo que el
- *    rol "USER" o "MODERATOR" decide a dónde se navega.
- *
- * 4. onNavigateToRegister abre la pantalla de registro ("register").
- *
- * ============================================================================
- */
 
-// Código de Deep Links eliminado - confirmación de email desactivada en Supabase
 @Composable
 fun LoginScreen(
     onLoginSuccess: (User) -> Unit,

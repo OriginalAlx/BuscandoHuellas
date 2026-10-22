@@ -12,7 +12,7 @@ import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import javax.inject.Inject
 
-// Código de Deep Links eliminado - confirmación de email desactivada en Supabase
+
 @HiltViewModel
 class RegisterViewModel @Inject constructor(
     private val authRepository: AuthRepository
@@ -149,8 +149,7 @@ class RegisterViewModel @Inject constructor(
         else -> null
     }
 
-    // Limpia el mensaje de error al editar un campo, pero conserva el estado
-    // Loading o el Success de un registro ya completado.
+    
     private fun RegisterStatus.withoutError(): RegisterStatus =
         if (this is RegisterStatus.Error) {
             RegisterStatus.Idle

@@ -2,7 +2,7 @@ package com.app.buscandohuellas.ui.screens.register
 
 import com.app.buscandohuellas.domain.model.User
 
-// Código de Deep Links eliminado - confirmación de email desactivada en Supabase
+
 sealed interface RegisterStatus {
     data object Idle : RegisterStatus
     data object Loading : RegisterStatus

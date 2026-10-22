@@ -3,15 +3,15 @@
     xmlns:tools="http://schemas.android.com/tools">
 
     <uses-permission android:name="android.permission.INTERNET" />
-    <!-- Geolocalización para crear reportes de mascotas perdidas (Objetivo 3). -->
+    
     <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION" />
     <uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION" />
-    <!-- Cámara y galería para añadir foto al reporte -->
+    
     <uses-permission android:name="android.permission.CAMERA" />
     <uses-feature android:name="android.hardware.camera" android:required="false" />
-    <!-- Android < 13 -->
+    
     <uses-permission android:name="android.permission.READ_EXTERNAL_STORAGE" android:maxSdkVersion="32" />
-    <!-- Android >= 13 -->
+    
     <uses-permission android:name="android.permission.READ_MEDIA_IMAGES" />
 
     <application
@@ -24,7 +24,7 @@
         android:roundIcon="@mipmap/ic_launcher_round"
         android:supportsRtl="true"
         android:theme="@style/Theme.BuscandoHuellas">
-        <!-- Código de Deep Links eliminado - confirmación de email desactivada en Supabase -->
+        
         <activity
             android:name=".MainActivity"
             android:exported="true"
@@ -47,7 +47,7 @@
                 android:resource="@xml/file_paths" />
         </provider>
 
-        <!-- API Key de Google Maps (inyectada desde local.properties vía build.gradle.kts) -->
+        
         <meta-data
             android:name="com.google.android.geo.API_KEY"
             android:value="${MAPS_API_KEY}" />

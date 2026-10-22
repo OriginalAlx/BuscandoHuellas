@@ -47,30 +47,30 @@ import com.google.maps.android.compose.MarkerState
 import com.google.maps.android.compose.rememberCameraPositionState
 import java.util.Locale
 
-/** Ubicación de reserva usada únicamente si no se obtiene la del dispositivo. */
+
 private val DEFAULT_LOCATION = LatLng(40.416775, -3.703790)
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun MapPickerScreen(
-    /** Ubicación ya confirmada previamente (si existe), para inicializar el marcador. */
+    
     initialLatitude: Double?,
     initialLongitude: Double?,
-    /** Última ubicación conocida del usuario (obtenida mientras el picker está abierto). */
+    
     currentLatitude: Double?,
     currentLongitude: Double?,
-    /** true mientras se solicita la ubicación actual al FusedLocationProviderClient. */
+    
     isLocating: Boolean,
-    /** Solicita la ubicación actual (requiere permiso ya concedido o el flujo de la UI). */
+    
     onUseCurrentLocation: () -> Unit,
-    /** Confirma la ubicación seleccionada y la devuelve al CreateReportViewModel. */
+    
     onConfirm: (latitude: Double, longitude: Double) -> Unit,
-    /** Cierra el selector sin cambios. */
+    
     onCancel: () -> Unit
 ) {
     val context = LocalContext.current
 
-    // Verifica si la API Key de Google Maps está configurada en el manifest.
+    
     val hasMapApiKey = remember {
         try {
             val appInfo = context.packageManager.getApplicationInfo(
@@ -84,21 +84,21 @@ fun MapPickerScreen(
         }
     }
 
-    // Punto inicial del mapa: confirmación previa > ubicación actual > reserva.
+    
     val startTarget = LatLng(
         initialLatitude ?: currentLatitude ?: DEFAULT_LOCATION.latitude,
         initialLongitude ?: currentLongitude ?: DEFAULT_LOCATION.longitude
     )
 
-    // Estado de la cámara: recuerda su posición ante rotaciones de pantalla.
+    
     val cameraPositionState = rememberCameraPositionState {
         position = CameraPosition.fromLatLngZoom(startTarget, 14f)
     }
 
-    // Marcador seleccionable por clic o drag & drop.
+    
     val markerState = remember { MarkerState(startTarget) }
 
-    // Re-centra la cámara y el marcador cuando se obtiene la ubicación actual.
+    
     LaunchedEffect(currentLatitude, currentLongitude) {
         if (currentLatitude != null && currentLongitude != null) {
             val current = LatLng(currentLatitude, currentLongitude)
@@ -121,7 +121,7 @@ fun MapPickerScreen(
         }
     ) { paddingValues ->
         if (!hasMapApiKey) {
-            // Sin API Key: mensaje explicativo en lugar de un mapa en blanco.
+            
             NoApiKeyContent(modifier = Modifier.padding(paddingValues))
             return@Scaffold
         }
@@ -135,12 +135,12 @@ fun MapPickerScreen(
                 cameraPositionState = cameraPositionState,
                 markerState = markerState,
                 onMapClick = { latLng ->
-                    // Clic en cualquier punto del mapa: mueve el marcador ahí.
+                    
                     markerState.position = latLng
                 }
             )
 
-            // Botón flotante: "Usar mi ubicación actual" dentro del mapa.
+            
             FloatingActionButton(
                 onClick = onUseCurrentLocation,
                 modifier = Modifier
@@ -160,7 +160,7 @@ fun MapPickerScreen(
                 }
             }
 
-            // Tarjeta inferior con las coordenadas seleccionadas y botones finales.
+            
             Card(
                 modifier = Modifier
                     .align(Alignment.BottomCenter)
@@ -223,14 +223,14 @@ fun MapPickerScreen(
     }
 }
 
-/** Mapa interactivo envuelto en AndroidView-compatible composable de maps-compose. */
+
 @Composable
 private fun GoogleMapView(
     cameraPositionState: com.google.maps.android.compose.CameraPositionState,
     markerState: MarkerState,
     onMapClick: (LatLng) -> Unit
 ) {
-    // GoogleMap de maps-compose: clic para reposicionar + marcador arrastrable.
+    
     GoogleMap(
         modifier = Modifier.fillMaxSize(),
         cameraPositionState = cameraPositionState,
@@ -245,7 +245,7 @@ private fun GoogleMapView(
     }
 }
 
-/** Contenido mostrado cuando falta la API Key de Google Maps. */
+
 @Composable
 private fun NoApiKeyContent(modifier: Modifier = Modifier) {
     Column(
@@ -271,6 +271,6 @@ private fun NoApiKeyContent(modifier: Modifier = Modifier) {
     }
 }
 
-/** Formatea una coordenada con 6 decimales y puntos consistentes. */
+
 private fun formatCoordPrecise(value: Double): String =
     String.format(Locale.US, "%.6f", value)

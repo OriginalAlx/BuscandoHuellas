@@ -20,7 +20,7 @@ import kotlinx.serialization.json.contentOrNull
 import kotlinx.serialization.json.jsonPrimitive
 import kotlinx.serialization.json.put
 
-// Código de Deep Links eliminado - confirmación de email desactivada en Supabase
+
 private const val TAG = "AuthRepository"
 private const val FULL_NAME_KEY = "full_name"
 
@@ -37,9 +37,7 @@ class AuthRepositoryImpl(
         val sessionUser = supabaseClient.auth.currentUserOrNull()
             ?: throw IllegalStateException("No se pudo obtener la sesión del usuario")
 
-        // El perfil de la tabla `users` es opcional: si aún no existe (la base de datos
-        // todavía no está cargada) se construye el usuario desde la sesión de Auth,
-        // tomando el rol por defecto USER y el nombre desde user_metadata.full_name.
+        
         val profile = selectProfile(sessionUser.id)
         Result.success(
             profile?.withMetadataName(sessionUser) ?: sessionUser.toDomainUser()
@@ -58,10 +56,8 @@ class AuthRepositoryImpl(
     }
 
     override suspend fun registerUser(user: RegisterUser): Result<User> {
-        // SEGURIDAD: el cliente siempre envía el rol fijo "USER" y el rol MODERATOR no se
-        // puede crear desde la app. Esto debe reforzarse en el backend (Spring Boot):
-        // validar el rol en la API y asignar el perfil desde un trigger en Supabase que al
-        // alta en auth.users cree la fila en public.users únicamente con el rol USER.
+        
+        
         if (user.role != RegisterUser.ROLE_USER) {
             return Result.failure(Exception("Solo se pueden crear cuentas de usuario."))
         }
@@ -86,16 +82,14 @@ class AuthRepositoryImpl(
 
             val sessionUser = supabaseClient.auth.currentUserOrNull()
             if (sessionUser == null) {
-                // Con la confirmación de email desactivada en Supabase, signUpWith
-                // crea la sesión al instante. Este caso solo ocurriría ante una
-                // configuración inesperada del proyecto (p. ej. confirmación activada).
+                
+                
                 Result.failure(
                     Exception("No se pudo completar el registro. Inténtalo de nuevo.")
                 )
             } else {
-                // El alta del perfil en la tabla `users` es best-effort: la cuenta ya
-                // es válida en Auth y se puede acceder con ella aunque el perfil aún
-                // no exista (base de datos sin cargar / RLS de INSERT pendiente).
+                
+                
                 val profile = ensureProfile(sessionUser.id, sessionUser.email ?: email)
                 Result.success(
                     profile?.withMetadataName(sessionUser) ?: sessionUser.toDomainUser()
@@ -136,7 +130,7 @@ class AuthRepositoryImpl(
         supabaseClient.auth.signOut()
     }
 
-    /** Construye un [User] a partir de la sesión de Auth, sin depender de la tabla `users`. */
+    
     private fun UserInfo.toDomainUser(role: String = RegisterUser.ROLE_USER): User = User(
         id = id,
         email = email.orEmpty(),
@@ -144,17 +138,17 @@ class AuthRepositoryImpl(
         fullName = fullNameFromMetadata()
     )
 
-    /** Completa el nombre del perfil con el de la sesión (user_metadata.full_name) si falta. */
+    
     private fun User.withMetadataName(sessionUser: UserInfo): User =
         copy(fullName = sessionUser.fullNameFromMetadata() ?: fullName)
 
-    /** Lee user_metadata.full_name de Supabase Auth, donde se guarda el nombre completo. */
+    
     private fun UserInfo.fullNameFromMetadata(): String? =
         userMetadata?.get(FULL_NAME_KEY)?.jsonPrimitive?.contentOrNull?.takeIf { it.isNotBlank() }
 
     private suspend fun signUpOrSignIn(user: RegisterUser) {
         try {
-            // Solo se envían credenciales y el nombre completo en metadatos; el rol nunca viaja al backend.
+            
             supabaseClient.auth.signUpWith(Email) {
                 email = user.email
                 password = user.password
@@ -206,7 +200,7 @@ class AuthRepositoryImpl(
         } catch (insertError: CancellationException) {
             throw insertError
         } catch (insertError: RestException) {
-            // Clave duplicada (un trigger ya creó el perfil) o policy de INSERT ausente: se relee el perfil.
+            
             Log.w(TAG, "No se pudo insertar el perfil, se reintenta con select", insertError)
             selectProfile(userId)
         }
@@ -253,8 +247,7 @@ class AuthRepositoryImpl(
     }
 }
 
-// password_hash es NOT NULL en la tabla (esquema legacy de Spring Boot); el hash real
-// vive en Supabase Auth, por eso se envía vacío y siempre se codifica (sin default).
+
 @Serializable
 private data class UserInsertRow(
     val id: String,

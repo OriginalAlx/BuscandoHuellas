@@ -48,14 +48,6 @@ import androidx.hilt.lifecycle.viewmodel.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.app.buscandohuellas.ui.theme.BrandColors
 
-/**
- * Pantalla principal (dashboard) de BuscandoHuellas.
- *
- * Solo orquesta: observa el estado del [HomeViewModel], aplica el Scaffold
- * (TopBar + BottomNavigation + FAB) y delega el contenido de cada pestaña en
- * sub-composables privados. Los componentes visuales reutilizables viven en
- * HomeComponents.kt.
- */
 
 @Composable
 fun HomeScreen(
@@ -85,7 +77,7 @@ fun HomeScreen(
             )
         },
         floatingActionButton = {
-            // El diseño solo muestra el FAB en la pestaña Mapa.
+            
             if (uiState.selectedTab == HomeTab.MAP) {
                 MapReportFab(onClick = onNavigateToCreateReport)
             }
@@ -110,11 +102,11 @@ fun HomeScreen(
                     onAlertsBannerClick = {
                         viewModel.onTabSelected(HomeTab.ALERTS)
                     },
-                    onSeeAllReportsClick = { /* TODO: ir al listado completo */ }
+                    onSeeAllReportsClick = {  }
                 )
 
                 HomeTab.MAP -> MapContent(
-                    onRecenterClick = { /* TODO: recentrar el mapa */ }
+                    onRecenterClick = {  }
                 )
 
                 HomeTab.ALERTS -> AlertsContent(
@@ -136,9 +128,6 @@ fun HomeScreen(
     }
 }
 
-// =====================================================================
-// TOP BAR
-// =====================================================================
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -160,14 +149,14 @@ private fun HomeTopBar(
         },
         actions = {
             if (selectedTab == HomeTab.MAP) {
-                IconButton(onClick = { /* TODO: abrir filtros del mapa */ }) {
+                IconButton(onClick = {  }) {
                     Icon(
                         imageVector = Icons.AutoMirrored.Filled.KeyboardArrowRight,
                         contentDescription = "Filtros",
                         tint = BrandColors.TextSecondary,
                         modifier = Modifier.size(22.dp)
                     )
-                    // TODO: Reemplazar con ícono exacto de Figma (filtros)
+                    
                 }
             }
 
@@ -201,9 +190,6 @@ private fun HomeTopBar(
     )
 }
 
-// =====================================================================
-// PESTAÑA: INICIO
-// =====================================================================
 
 @Composable
 private fun HomeContent(
@@ -261,9 +247,6 @@ private fun HomeContent(
     }
 }
 
-// =====================================================================
-// PESTAÑA: MAPA
-// =====================================================================
 
 @Composable
 private fun MapContent(onRecenterClick: () -> Unit) {
@@ -279,9 +262,6 @@ private fun MapContent(onRecenterClick: () -> Unit) {
     }
 }
 
-// =====================================================================
-// PESTAÑA: ALERTAS
-// =====================================================================
 
 @Composable
 private fun AlertsContent(
@@ -352,9 +332,6 @@ private fun AlertsContent(
     }
 }
 
-// =====================================================================
-// PESTAÑA: PERFIL
-// =====================================================================
 
 @Composable
 private fun ProfileContent(
@@ -376,7 +353,7 @@ private fun ProfileContent(
             modifier = Modifier.padding(horizontal = 20.dp),
             verticalArrangement = Arrangement.spacedBy(16.dp)
         ) {
-            //ProfileStatsCard(profile = profile)
+            
             Card(
                 shape = RoundedCornerShape(16.dp),
                 colors = CardDefaults.cardColors(containerColor = BrandColors.Surface),
@@ -395,7 +372,7 @@ private fun ProfileContent(
     }
 }
 
-/** Cabecera lavanda del perfil: avatar, nombre, email y "Editar perfil". */
+
 @Composable
 private fun ProfileHeader(profile: UserProfileUi, onEditProfileClick: () -> Unit) {
     Column(
@@ -466,45 +443,6 @@ private fun ProfileHeader(profile: UserProfileUi, onEditProfileClick: () -> Unit
     }
 }
 
-/** Tarjeta de contadores: Reportes / Aportes / Reencuentros. */
-/*@Composable
-private fun ProfileStatsCard(profile: UserProfileUi) {
-    Card(
-        modifier = Modifier.fillMaxWidth(),
-        shape = RoundedCornerShape(16.dp),
-        colors = CardDefaults.cardColors(containerColor = BrandColors.Surface),
-        elevation = CardDefaults.cardElevation(defaultElevation = 1.dp)
-    ) {
-        Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(vertical = 18.dp),
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            ProfileStatItem(
-                value = profile.reportsCount.toString(),
-                label = "Reportes",
-                modifier = Modifier.weight(1f)
-            )
-            StatsDivider()
-            ProfileStatItem(
-                value = profile.contributionsCount.toString(),
-                label = "Aportes",
-                modifier = Modifier.weight(1f)
-            )
-            StatsDivider()
-            ProfileStatItem(
-                value = profile.reunionsCount.toString(),
-                label = "Reencuentros",
-                modifier = Modifier.weight(1f)
-            )
-        }
-    }
-}*/
-
-// =====================================================================
-// PREVIEWS
-// =====================================================================
 
 @androidx.compose.ui.tooling.preview.Preview(showBackground = true, heightDp = 900)
 @Composable
