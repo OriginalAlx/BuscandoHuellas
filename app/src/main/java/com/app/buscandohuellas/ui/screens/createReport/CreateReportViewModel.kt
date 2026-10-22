@@ -87,18 +87,23 @@ class CreateReportViewModel @Inject constructor(
     fun getCurrentLocation() {
         _isLocationLoading.value = true
         try {
-            fusedLocationClient.lastLocation
+            val currentLocationRequest = com.google.android.gms.location.CurrentLocationRequest.Builder()
+                .setPriority(com.google.android.gms.location.Priority.PRIORITY_HIGH_ACCURACY)
+                .build()
+
+            fusedLocationClient.getCurrentLocation(currentLocationRequest, null)
                 .addOnSuccessListener { location ->
                     if (location != null) {
                         _latitude.value = location.latitude
                         _longitude.value = location.longitude
                         clearError()
+                        _isLocationLoading.value = false
                     } else {
                         _uiState.value = CreateReportUiState.Error(
                             "No se pudo obtener la ubicación. Activa el GPS e inténtalo de nuevo."
                         )
+                        _isLocationLoading.value = false
                     }
-                    _isLocationLoading.value = false
                 }
                 .addOnFailureListener { error ->
                     _uiState.value = CreateReportUiState.Error(

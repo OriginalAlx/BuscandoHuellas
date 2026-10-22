@@ -11,13 +11,30 @@ import io.github.jan.supabase.postgrest.from
 import io.github.jan.supabase.storage.storage
 import io.ktor.http.ContentType
 import kotlinx.coroutines.CancellationException
+import kotlinx.serialization.SerialName
+import kotlinx.serialization.Serializable
+import kotlinx.serialization.json.JsonArray
+import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.put
 import java.util.UUID
 import javax.inject.Inject
 
 private const val TAG = "ReportRepository"
+
+@Serializable
+data class ReportDto(
+    @SerialName("id") val id: String? = null,
+    @SerialName("user_id") val userId: String? = null,
+    @SerialName("pet_name") val petName: String? = null,
+    @SerialName("description") val description: String? = null,
+    @SerialName("status") val status: String? = null,
+    @SerialName("image_url") val imageUrl: String? = null,
+    @SerialName("created_at") val createdAt: String? = null,
+    @SerialName("location") val location: JsonElement? = null
+)
 
 
 class ReportRepositoryImpl @Inject constructor(
@@ -110,6 +127,72 @@ class ReportRepositoryImpl @Inject constructor(
         
         Log.w(TAG, "No se pudo eliminar la imagen del storage", error)
         Result.success(Unit)
+    }
+
+    override suspend fun getAllReports(): Result<List<Report>> = try {
+        val dtos = supabaseClient
+            .from("reports")
+            .select()
+            .decodeList<ReportDto>()
+
+        val reports = dtos.mapNotNull { dto ->
+            val petName = dto.petName ?: return@mapNotNull null
+            val location = dto.location?.let { parseLocation(it) }
+
+            Report(
+                id = dto.id,
+                userId = dto.userId.orEmpty(),
+                petName = petName,
+                description = dto.description.orEmpty(),
+                status = dto.status ?: "LOST",
+                imageUrl = dto.imageUrl,
+                latitude = location?.first,
+                longitude = location?.second
+            )
+        }
+
+        Result.success(reports)
+    } catch (error: CancellationException) {
+        throw error
+    } catch (error: RestException) {
+        Log.e(TAG, "RestException en getAllReports", error)
+        Result.failure(Exception(friendlyMessage(error)))
+    } catch (error: HttpRequestException) {
+        Log.e(TAG, "HttpRequestException en getAllReports", error)
+        Result.failure(Exception("No hay conexión a internet. Verifica tu red e intenta de nuevo."))
+    } catch (error: Exception) {
+        Log.e(TAG, "Error inesperado en getAllReports", error)
+        Result.failure(
+            Exception(error.message ?: "No se pudieron cargar los reportes. Inténtalo de nuevo.")
+        )
+    }
+
+    private fun parseLocation(location: JsonElement): Pair<Double, Double>? = when (location) {
+        is JsonPrimitive -> if (location.isString) parsePoint(location.content) else null
+        is JsonObject -> {
+            val coordinates = (location["coordinates"] as? JsonArray) ?: return null
+            val lon = (coordinates.getOrNull(0) as? JsonPrimitive)?.content?.toDoubleOrNull()
+            val lat = (coordinates.getOrNull(1) as? JsonPrimitive)?.content?.toDoubleOrNull()
+            if (lon != null && lat != null) lon to lat else null
+        }
+        else -> null
+    }
+
+    private fun parsePoint(pointString: String): Pair<Double, Double>? {
+        val inside = pointString
+            .substringAfter('(', "")
+            .substringBefore(')')
+            .trim()
+
+        val parts = inside
+            .split(' ')
+            .map { it.trim() }
+            .filter { it.isNotBlank() }
+
+        val lon = parts.getOrNull(0)?.replace(",", ".")?.toDoubleOrNull()
+        val lat = parts.getOrNull(1)?.replace(",", ".")?.toDoubleOrNull()
+
+        return if (lon != null && lat != null) lon to lat else null
     }
 
     private fun friendlyMessage(error: Throwable): String {

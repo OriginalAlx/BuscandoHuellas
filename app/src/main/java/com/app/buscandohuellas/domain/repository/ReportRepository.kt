@@ -13,4 +13,6 @@ interface ReportRepository {
 
     
     suspend fun deleteReportImage(imageUrl: String): Result<Unit>
+
+    suspend fun getAllReports(): Result<List<Report>>
 }

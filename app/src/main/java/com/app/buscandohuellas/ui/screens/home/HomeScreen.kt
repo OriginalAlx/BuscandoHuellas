@@ -1,5 +1,10 @@
 package com.app.buscandohuellas.ui.screens.home
 
+import android.Manifest
+import android.annotation.SuppressLint
+import android.content.pm.PackageManager
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
@@ -46,7 +51,23 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.hilt.lifecycle.viewmodel.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import com.app.buscandohuellas.domain.model.Report
 import com.app.buscandohuellas.ui.theme.BrandColors
+import com.google.android.gms.maps.model.BitmapDescriptor
+import com.google.android.gms.maps.model.BitmapDescriptorFactory
+import com.google.android.gms.maps.model.CameraPosition
+import com.google.android.gms.maps.model.LatLng
+import com.google.maps.android.compose.GoogleMap
+import com.google.maps.android.compose.Marker
+import com.google.maps.android.compose.MarkerState
+import com.google.maps.android.compose.rememberCameraPositionState
+import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
+import androidx.core.content.ContextCompat
+import com.google.android.gms.location.LocationServices
 
 
 @Composable
@@ -58,6 +79,9 @@ fun HomeScreen(
     viewModel: HomeViewModel = hiltViewModel()
 ) {
     val uiState by viewModel.uiState.collectAsStateWithLifecycle()
+    val reportsForMap by viewModel.reportsForMap.collectAsStateWithLifecycle()
+    val isLoadingMap by viewModel.isLoadingMap.collectAsStateWithLifecycle()
+    val mapError by viewModel.mapError.collectAsStateWithLifecycle()
 
     Scaffold(
         topBar = {
@@ -106,7 +130,11 @@ fun HomeScreen(
                 )
 
                 HomeTab.MAP -> MapContent(
-                    onRecenterClick = {  }
+                    reports = reportsForMap,
+                    isLoading = isLoadingMap,
+                    errorMessage = mapError,
+                    onMarkerClick = onReportClick,
+                    onRetry = viewModel::loadReports
                 )
 
                 HomeTab.ALERTS -> AlertsContent(
@@ -249,12 +277,153 @@ private fun HomeContent(
 
 
 @Composable
-private fun MapContent(onRecenterClick: () -> Unit) {
+private fun MapContent(
+    reports: List<Report>,
+    isLoading: Boolean,
+    errorMessage: String?,
+    onMarkerClick: (String) -> Unit,
+    onRetry: () -> Unit
+) {
+    val context = androidx.compose.ui.platform.LocalContext.current
+    var currentLocation by remember { mutableStateOf<LatLng?>(null) }
+    var hasCenteredOnUser by remember { mutableStateOf(false) }
+
+    val fusedLocationClient = remember {
+        LocationServices.getFusedLocationProviderClient(context)
+    }
+
+    @SuppressLint("MissingPermission")
+    fun fetchUserLocation() {
+        if (ContextCompat.checkSelfPermission(
+                context,
+                Manifest.permission.ACCESS_FINE_LOCATION
+            ) != PackageManager.PERMISSION_GRANTED
+        ) {
+            return
+        }
+
+        val currentLocationRequest = com.google.android.gms.location.CurrentLocationRequest.Builder()
+            .setPriority(com.google.android.gms.location.Priority.PRIORITY_HIGH_ACCURACY)
+            .build()
+
+        fusedLocationClient.getCurrentLocation(currentLocationRequest, null)
+            .addOnSuccessListener { location ->
+                if (location != null) {
+                    currentLocation = LatLng(location.latitude, location.longitude)
+                }
+            }
+            .addOnFailureListener { _ ->
+                fusedLocationClient.lastLocation
+                    .addOnSuccessListener { cachedLocation ->
+                        if (cachedLocation != null) {
+                            currentLocation = LatLng(cachedLocation.latitude, cachedLocation.longitude)
+                        }
+                    }
+            }
+    }
+
+    val locationPermissionLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.RequestPermission()
+    ) { granted ->
+        if (granted) {
+            fetchUserLocation()
+        }
+    }
+
+    val cameraPositionState = rememberCameraPositionState {
+        position = CameraPosition.fromLatLngZoom(DEFAULT_MAP_CENTER, 12f)
+    }
+
+    LaunchedEffect(Unit) {
+        if (ContextCompat.checkSelfPermission(
+                context,
+                Manifest.permission.ACCESS_FINE_LOCATION
+            ) == PackageManager.PERMISSION_GRANTED
+        ) {
+            fetchUserLocation()
+        } else {
+            locationPermissionLauncher.launch(Manifest.permission.ACCESS_FINE_LOCATION)
+        }
+    }
+
+    LaunchedEffect(currentLocation) {
+        val userLocation = currentLocation ?: return@LaunchedEffect
+        if (!hasCenteredOnUser) {
+            cameraPositionState.position =
+                CameraPosition.fromLatLngZoom(userLocation, 13f)
+            hasCenteredOnUser = true
+        }
+    }
+
+    fun currentCenter(): LatLng {
+        val located = reports.firstOrNull { it.latitude != null && it.longitude != null }
+        return located?.let { LatLng(it.latitude!!, it.longitude!!) } ?: DEFAULT_MAP_CENTER
+    }
+
     Box(modifier = Modifier.fillMaxSize()) {
-        MapPlaceholder()
+        GoogleMap(
+            modifier = Modifier.fillMaxSize(),
+            cameraPositionState = cameraPositionState
+        ) {
+            reports.forEach { report ->
+                val lat = report.latitude
+                val lon = report.longitude
+                if (lat != null && lon != null) {
+                    val icon = remember(report.status) { getMarkerIcon(report.status) }
+                    Marker(
+                        state = MarkerState(position = LatLng(lat, lon)),
+                        title = report.petName,
+                        snippet = report.status,
+                        icon = icon,
+                        onInfoWindowClick = { onMarkerClick(report.id.orEmpty()) }
+                    )
+                }
+            }
+        }
+
+        if (errorMessage != null) {
+            Text(
+                text = errorMessage,
+                style = MaterialTheme.typography.bodyMedium,
+                color = BrandColors.Accent,
+                modifier = Modifier
+                    .align(Alignment.TopCenter)
+                    .padding(16.dp)
+            )
+        }
+
+        if (isLoading) {
+            CircularProgressIndicator(
+                modifier = Modifier
+                    .align(Alignment.Center)
+                    .size(44.dp)
+            )
+        }
+
+        if (!isLoading && errorMessage == null &&
+            reports.none { it.latitude != null && it.longitude != null }
+        ) {
+            Card(
+                modifier = Modifier
+                    .align(Alignment.BottomCenter)
+                    .padding(16.dp),
+                shape = RoundedCornerShape(12.dp),
+                colors = CardDefaults.cardColors(containerColor = BrandColors.Surface)
+            ) {
+                Text(
+                    text = "No hay reportes activos en esta zona",
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = BrandColors.TextPrimary,
+                    modifier = Modifier.padding(horizontal = 16.dp, vertical = 12.dp)
+                )
+            }
+        }
 
         MapRecenterButton(
-            onClick = onRecenterClick,
+            onClick = {
+                val target = currentLocation ?: currentCenter()
+                cameraPositionState.position = CameraPosition.fromLatLngZoom(target, 13f)
+            },
             modifier = Modifier
                 .align(Alignment.BottomEnd)
                 .padding(end = 20.dp, bottom = 24.dp)
@@ -486,14 +655,37 @@ private fun ProfileContentPreview() {
 @Composable
 private fun MapContentPreview() {
     MaterialTheme {
-        Box(modifier = Modifier.fillMaxSize()) {
-            MapPlaceholder()
-            MapRecenterButton(
-                onClick = {},
-                modifier = Modifier
-                    .align(Alignment.BottomEnd)
-                    .padding(end = 20.dp, bottom = 24.dp)
-            )
-        }
+        MapContent(
+            reports = listOf(
+                Report(
+                    userId = "1",
+                    petName = "Luna",
+                    description = "Beagle perdida",
+                    status = "LOST",
+                    latitude = 40.4200,
+                    longitude = -3.6900
+                ),
+                Report(
+                    userId = "2",
+                    petName = "Nala",
+                    description = "Gatita encontrada",
+                    status = "FOUND",
+                    latitude = 40.4250,
+                    longitude = -3.7050
+                )
+            ),
+            isLoading = false,
+            errorMessage = null,
+            onMarkerClick = {},
+            onRetry = {}
+        )
     }
+}
+
+private val DEFAULT_MAP_CENTER = LatLng(0.0, 0.0)
+
+private fun getMarkerIcon(status: String): BitmapDescriptor = when (status.uppercase()) {
+    "FOUND" -> BitmapDescriptorFactory.defaultMarker(BitmapDescriptorFactory.HUE_GREEN)
+    "SIGHTED" -> BitmapDescriptorFactory.defaultMarker(BitmapDescriptorFactory.HUE_AZURE)
+    else -> BitmapDescriptorFactory.defaultMarker(BitmapDescriptorFactory.HUE_RED)
 }

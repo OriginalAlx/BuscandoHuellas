@@ -48,7 +48,7 @@ import com.google.maps.android.compose.rememberCameraPositionState
 import java.util.Locale
 
 
-private val DEFAULT_LOCATION = LatLng(40.416775, -3.703790)
+private val DEFAULT_LOCATION = LatLng(0.0, 0.0)
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
