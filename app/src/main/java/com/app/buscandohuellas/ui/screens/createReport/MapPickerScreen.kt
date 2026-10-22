@@ -52,8 +52,9 @@ import java.util.Locale
  * MAP PICKER SCREEN (pantalla completa para seleccionar ubicación en el mapa)
  * ============================================================================
  *
- * - Mapa interactivo centrado en la ubicación actual del usuario (si existe)
- *   o en Madrid (España) como ubicación por defecto si no hay permisos.
+ * - Mapa interactivo centrado en la ubicación actual del usuario (si existe
+ *   permiso); la ubicación de reserva solo se usa si no se consigue la del
+ *   dispositivo.
  * - El usuario puede hacer clic en cualquier punto del mapa o arrastrar el
  *   marcador para reposicionarlo (drag & drop).
  * - Botón "Usar mi ubicación actual" dentro del mapa: reutiliza
@@ -67,7 +68,7 @@ import java.util.Locale
  * ============================================================================
  */
 
-/** Ubicación por defecto: Madrid, España. */
+/** Ubicación de reserva usada únicamente si no se obtiene la del dispositivo. */
 private val DEFAULT_LOCATION = LatLng(40.416775, -3.703790)
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -104,7 +105,7 @@ fun MapPickerScreen(
         }
     }
 
-    // Punto inicial del mapa: confirmación previa > ubicación actual > Madrid.
+    // Punto inicial del mapa: confirmación previa > ubicación actual > reserva.
     val startTarget = LatLng(
         initialLatitude ?: currentLatitude ?: DEFAULT_LOCATION.latitude,
         initialLongitude ?: currentLongitude ?: DEFAULT_LOCATION.longitude
