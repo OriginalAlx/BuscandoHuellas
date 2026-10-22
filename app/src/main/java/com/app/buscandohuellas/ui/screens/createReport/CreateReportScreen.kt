@@ -183,9 +183,6 @@ fun CreateReportScreen(
         }
     }
 
-    // Al abrir el selector de mapa, centra automáticamente en la ubicación del
-    // dispositivo. Si falta el permiso, lo solicita y en cuanto se conceda el
-    // mapa se re-centra en la ubicación del usuario.
     LaunchedEffect(isMapPickerOpen) {
         if (isMapPickerOpen && latitude == null && longitude == null) {
             val locationGranted = ContextCompat.checkSelfPermission(

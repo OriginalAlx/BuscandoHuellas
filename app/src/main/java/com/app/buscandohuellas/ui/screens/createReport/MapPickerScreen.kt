@@ -47,27 +47,6 @@ import com.google.maps.android.compose.MarkerState
 import com.google.maps.android.compose.rememberCameraPositionState
 import java.util.Locale
 
-/**
- * ============================================================================
- * MAP PICKER SCREEN (pantalla completa para seleccionar ubicación en el mapa)
- * ============================================================================
- *
- * - Mapa interactivo centrado en la ubicación actual del usuario (si existe
- *   permiso); la ubicación de reserva solo se usa si no se consigue la del
- *   dispositivo.
- * - El usuario puede hacer clic en cualquier punto del mapa o arrastrar el
- *   marcador para reposicionarlo (drag & drop).
- * - Botón "Usar mi ubicación actual" dentro del mapa: reutiliza
- *   FusedLocationProviderClient a través del callback onUseCurrentLocation.
- * - "Confirmar ubicación" devuelve las coordenadas (lat, lon) al ViewModel.
- * - "Cancelar" cierra sin cambios.
- *
- * Estado: la cámara sobrevive a rotaciones (CameraPositionState guarda su
- * posición) y los datos confirmados viven en CreateReportViewModel, que
- * también sobrevive a cambios de configuración.
- * ============================================================================
- */
-
 /** Ubicación de reserva usada únicamente si no se obtiene la del dispositivo. */
 private val DEFAULT_LOCATION = LatLng(40.416775, -3.703790)
 
