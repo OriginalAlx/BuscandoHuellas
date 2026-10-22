@@ -72,6 +72,10 @@ class CreateReportViewModel @Inject constructor(
     private val _uploadedImageUrl = MutableStateFlow<String?>(null)
     val uploadedImageUrl: StateFlow<String?> = _uploadedImageUrl.asStateFlow()
 
+    // --- Selector de ubicación en mapa ---
+    private val _isMapPickerOpen = MutableStateFlow(false)
+    val isMapPickerOpen: StateFlow<Boolean> = _isMapPickerOpen.asStateFlow()
+
     fun onPetNameChange(value: String) {
         _petName.value = value
         clearError()
@@ -121,6 +125,32 @@ class CreateReportViewModel @Inject constructor(
         _uiState.value = CreateReportUiState.Error(
             "Necesitas conceder el permiso de ubicación para publicar el reporte."
         )
+    }
+
+    // ------------------------------------------------------------------
+    // Selector de ubicación en mapa (MapPickerScreen)
+    // ------------------------------------------------------------------
+
+    /** Abre la pantalla de selección de ubicación en el mapa. */
+    fun openMapPicker() {
+        clearError()
+        _isMapPickerOpen.value = true
+    }
+
+    /** Cierra la pantalla del mapa sin modificar las coordenadas. */
+    fun closeMapPicker() {
+        _isMapPickerOpen.value = false
+    }
+
+    /**
+     * Llamado por MapPickerScreen cuando el usuario confirma una ubicación.
+     * Actualiza los StateFlows de latitud/longitud y cierra el selector.
+     */
+    fun onMapLocationSelected(latitude: Double, longitude: Double) {
+        _latitude.value = latitude
+        _longitude.value = longitude
+        _isMapPickerOpen.value = false
+        clearError()
     }
 
     /**

@@ -26,6 +26,7 @@ import androidx.compose.material.icons.filled.CameraAlt
 import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Delete
+import androidx.compose.material.icons.filled.Map
 import androidx.compose.material.icons.filled.MyLocation
 import androidx.compose.material.icons.filled.PhotoLibrary
 import androidx.compose.material3.Button
@@ -122,6 +123,7 @@ fun CreateReportScreen(
     val isLocationLoading by viewModel.isLocationLoading.collectAsStateWithLifecycle()
     val selectedImageUri by viewModel.selectedImageUri.collectAsStateWithLifecycle()
     val isUploadingImage by viewModel.isUploadingImage.collectAsStateWithLifecycle()
+    val isMapPickerOpen by viewModel.isMapPickerOpen.collectAsStateWithLifecycle()
 
     val context = LocalContext.current
     val snackbarHostState = remember { SnackbarHostState() }
@@ -236,7 +238,8 @@ fun CreateReportScreen(
                     } else {
                         permissionLauncher.launch(Manifest.permission.ACCESS_FINE_LOCATION)
                     }
-                }
+                },
+                onSelectOnMap = { viewModel.openMapPicker() }
             )
 
             // Sección de foto
@@ -287,6 +290,37 @@ fun CreateReportScreen(
             }
         }
     }
+
+    // ------------------------------------------------------------------
+    // Overlay a pantalla completa: selector de ubicación en el mapa.
+    // Se dibuja por encima del formulario cuando isMapPickerOpen vale true.
+    // ------------------------------------------------------------------
+    if (isMapPickerOpen) {
+        MapPickerScreen(
+            initialLatitude = latitude,
+            initialLongitude = longitude,
+            currentLatitude = latitude,
+            currentLongitude = longitude,
+            isLocating = isLocationLoading,
+            onUseCurrentLocation = {
+                // Reutiliza el mismo flujo de permisos del botón "Obtener mi ubicación actual".
+                val locationGranted = ContextCompat.checkSelfPermission(
+                    context,
+                    Manifest.permission.ACCESS_FINE_LOCATION
+                ) == PackageManager.PERMISSION_GRANTED
+
+                if (locationGranted) {
+                    viewModel.getCurrentLocation()
+                } else {
+                    permissionLauncher.launch(Manifest.permission.ACCESS_FINE_LOCATION)
+                }
+            },
+            onConfirm = { selectedLat, selectedLon ->
+                viewModel.onMapLocationSelected(selectedLat, selectedLon)
+            },
+            onCancel = { viewModel.closeMapPicker() }
+        )
+    }
 }
 
 @Composable
@@ -294,7 +328,8 @@ private fun LocationSection(
     isLocationLoading: Boolean,
     latitude: Double?,
     longitude: Double?,
-    onRequestLocation: () -> Unit
+    onRequestLocation: () -> Unit,
+    onSelectOnMap: () -> Unit
 ) {
     Card(modifier = Modifier.fillMaxWidth()) {
         Column(
@@ -308,8 +343,8 @@ private fun LocationSection(
                 style = MaterialTheme.typography.titleSmall
             )
 
-            when {
-                isLocationLoading -> Row(
+            if (isLocationLoading) {
+                Row(
                     verticalAlignment = Alignment.CenterVertically,
                     horizontalArrangement = Arrangement.spacedBy(8.dp)
                 ) {
@@ -322,8 +357,38 @@ private fun LocationSection(
                         style = MaterialTheme.typography.bodyMedium
                     )
                 }
+            } else {
+                // Botón principal: obtener la ubicación con FusedLocationProviderClient.
+                Button(
+                    onClick = onRequestLocation,
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Icon(
+                        imageVector = Icons.Filled.MyLocation,
+                        contentDescription = null
+                    )
+                    Spacer(modifier = Modifier.width(8.dp))
+                    Text("Obtener mi ubicación actual")
+                }
+            }
 
-                latitude != null && longitude != null -> Row(
+            // Botón secundario: abrir el selector de ubicación en el mapa.
+            OutlinedButton(
+                onClick = onSelectOnMap,
+                enabled = !isLocationLoading,
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                Icon(
+                    imageVector = Icons.Filled.Map,
+                    contentDescription = null
+                )
+                Spacer(modifier = Modifier.width(8.dp))
+                Text("Seleccionar en mapa")
+            }
+
+            // Coordenadas actuales (obtenidas por GPS o confirmadas en el mapa).
+            if (latitude != null && longitude != null) {
+                Row(
                     verticalAlignment = Alignment.CenterVertically,
                     horizontalArrangement = Arrangement.spacedBy(8.dp)
                 ) {
@@ -337,18 +402,6 @@ private fun LocationSection(
                             formatCoordinate(longitude),
                         style = MaterialTheme.typography.bodyMedium
                     )
-                }
-
-                else -> Button(
-                    onClick = onRequestLocation,
-                    modifier = Modifier.fillMaxWidth()
-                ) {
-                    Icon(
-                        imageVector = Icons.Filled.MyLocation,
-                        contentDescription = null
-                    )
-                    Spacer(modifier = Modifier.width(8.dp))
-                    Text("Obtener mi ubicación actual")
                 }
             }
         }

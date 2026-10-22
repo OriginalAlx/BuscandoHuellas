@@ -6,7 +6,19 @@ plugins {
     alias(libs.plugins.hilt)
 }
 
+// Lee local.properties para obtener la API Key de Google Maps.
+// En local.properties añadir: MAPS_API_KEY=TU_API_KEY
+import java.util.Properties
+
+val localProperties = Properties()
+val localPropertiesFile = rootProject.file("local.properties")
+if (localPropertiesFile.exists()) {
+    localPropertiesFile.inputStream().use { localProperties.load(it) }
+}
+val mapsApiKey: String = localProperties.getProperty("MAPS_API_KEY", "")
+
 android {
+
     namespace = "com.app.buscandohuellas"
     compileSdk {
         version = release(37)
@@ -18,6 +30,9 @@ android {
         targetSdk = 37
         versionCode = 1
         versionName = "1.0"
+
+        // API Key de Google Maps inyectada al manifest desde local.properties
+        manifestPlaceholders["MAPS_API_KEY"] = mapsApiKey
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
@@ -68,6 +83,9 @@ dependencies {
     implementation(libs.play.services.location)
     // Coil para previsualización de imágenes seleccionadas desde galería/cámara
     implementation("io.coil-kt:coil-compose:2.6.0")
+    // Google Maps Compose para el selector de ubicación en mapa
+    implementation("com.google.maps.android:maps-compose:4.3.0")
+    implementation("com.google.android.gms:play-services-maps:18.2.0")
     testImplementation(libs.junit)
     androidTestImplementation(platform(libs.androidx.compose.bom))
     androidTestImplementation(libs.androidx.compose.ui.test.junit4)
