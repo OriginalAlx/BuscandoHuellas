@@ -38,6 +38,7 @@ import dagger.hilt.android.AndroidEntryPoint
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        OsmDroidInitializer.initialize(this)
         enableEdgeToEdge()
         setContent {
             BuscandoHuellasTheme {
@@ -109,12 +110,12 @@ fun AppNavHost(navController: NavHostController = rememberNavController()) {
             HomeScreen(
                 onNavigateToCreateReport = { navController.navigate("create_report") },
                 onReportClick = { reportId ->
-                    
-                    
+
+
                 },
                 onProfileClick = {
-                    
-                    
+
+
                 },
                 onLogout = {
                     navController.navigate("login") {

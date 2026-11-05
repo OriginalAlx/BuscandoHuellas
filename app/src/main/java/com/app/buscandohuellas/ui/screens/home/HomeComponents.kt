@@ -47,12 +47,17 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import coil.compose.AsyncImage
 import com.app.buscandohuellas.ui.theme.BrandColors
+import com.app.buscandohuellas.ui.utils.LocationUtils
+import org.osmdroid.util.GeoPoint
+import java.util.Locale
 
 
 enum class HomeTab(val label: String) {
@@ -96,8 +101,10 @@ data class RecentReport(
     val id: String,
     val petName: String,
     val breed: String,
-    val locationLine: String,
-    val status: PetReportStatus
+    val status: PetReportStatus,
+    val imageUrl: String? = null,
+    val latitude: Double? = null,
+    val longitude: Double? = null
 )
 
 
@@ -158,9 +165,30 @@ fun dummyHomeUiState(): HomeUiState = HomeUiState(
     selectedTab = HomeTab.HOME,
     nearbyAlertsCount = 2,
     recentReports = listOf(
-        RecentReport("1", "Luna", "Beagle", "Parque del Sol · 350 m", PetReportStatus.LOST),
-        RecentReport("2", "Nala", "Gatita", "Av. Libertad · 1,2 km", PetReportStatus.FOUND),
-        RecentReport("3", "Milo", "Mestizo", "Barrio Norte · 1,8 km", PetReportStatus.LOST)
+        RecentReport(
+            id = "1",
+            petName = "Luna",
+            breed = "Beagle",
+            status = PetReportStatus.LOST,
+            latitude = -25.7560,
+            longitude = -57.2550
+        ),
+        RecentReport(
+            id = "2",
+            petName = "Nala",
+            breed = "Gatita",
+            status = PetReportStatus.FOUND,
+            latitude = -25.7640,
+            longitude = -57.2610
+        ),
+        RecentReport(
+            id = "3",
+            petName = "Milo",
+            breed = "Mestizo",
+            status = PetReportStatus.LOST,
+            latitude = -25.7710,
+            longitude = -57.2660
+        )
     ),
     alerts = listOf(
         AlertItemUi(
@@ -435,9 +463,29 @@ fun ReportStatusChip(status: PetReportStatus, modifier: Modifier = Modifier) {
 @Composable
 fun PetReportCard(
     report: RecentReport,
+    userLocation: GeoPoint? = null,
     onClick: () -> Unit,
     modifier: Modifier = Modifier
 ) {
+    val reportLatitude = report.latitude
+    val reportLongitude = report.longitude
+
+    val locationText = when {
+        reportLatitude == null || reportLongitude == null -> "Sin ubicación"
+
+        userLocation != null -> {
+            val distanceKm = LocationUtils.calculateDistance(
+                userLocation.latitude,
+                userLocation.longitude,
+                reportLatitude,
+                reportLongitude
+            )
+            "A ${LocationUtils.formatDistance(distanceKm)} de ti"
+        }
+
+        else -> String.format(Locale.US, "%.4f, %.4f", reportLatitude, reportLongitude)
+    }
+
     Card(
         modifier = modifier
             .fillMaxWidth()
@@ -452,7 +500,18 @@ fun PetReportCard(
                 .padding(12.dp),
             verticalAlignment = Alignment.CenterVertically
         ) {
-            PetPhotoPlaceholder()
+            if (!report.imageUrl.isNullOrBlank()) {
+                AsyncImage(
+                    model = report.imageUrl,
+                    contentDescription = "Foto de ${report.petName}",
+                    contentScale = ContentScale.Crop,
+                    modifier = Modifier
+                        .size(64.dp)
+                        .clip(RoundedCornerShape(12.dp))
+                )
+            } else {
+                PetPhotoPlaceholder(size = 64.dp)
+            }
 
             Spacer(modifier = Modifier.width(14.dp))
 
@@ -478,7 +537,7 @@ fun PetReportCard(
                     )
                     Spacer(modifier = Modifier.width(4.dp))
                     Text(
-                        text = report.locationLine,
+                        text = locationText,
                         style = MaterialTheme.typography.bodySmall,
                         color = BrandColors.TextSecondary
                     )

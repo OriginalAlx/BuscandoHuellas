@@ -1,8 +1,16 @@
 package com.app.buscandohuellas.ui.screens.home
 
 import android.Manifest
-import android.annotation.SuppressLint
+import android.content.Intent
 import android.content.pm.PackageManager
+import android.graphics.Bitmap
+import android.graphics.Canvas
+import android.graphics.Color
+import android.graphics.Paint
+import android.graphics.drawable.BitmapDrawable
+import android.graphics.drawable.Drawable
+import android.net.Uri
+import android.provider.Settings
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
@@ -23,12 +31,15 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
+import androidx.compose.material.icons.filled.Map
 import androidx.compose.material.icons.filled.Notifications
 import androidx.compose.material.icons.filled.Pets
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Badge
 import androidx.compose.material3.BadgedBox
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FabPosition
 import androidx.compose.material3.Icon
@@ -37,38 +48,37 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Brush
-import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.Color as ComposeColor
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.compose.ui.viewinterop.AndroidView
+import androidx.core.content.ContextCompat
 import androidx.hilt.lifecycle.viewmodel.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.app.buscandohuellas.domain.model.Report
 import com.app.buscandohuellas.ui.theme.BrandColors
-import com.google.android.gms.maps.model.BitmapDescriptor
-import com.google.android.gms.maps.model.BitmapDescriptorFactory
-import com.google.android.gms.maps.model.CameraPosition
-import com.google.android.gms.maps.model.LatLng
-import com.google.maps.android.compose.GoogleMap
-import com.google.maps.android.compose.Marker
-import com.google.maps.android.compose.MarkerState
-import com.google.maps.android.compose.rememberCameraPositionState
-import androidx.compose.material3.CircularProgressIndicator
-import androidx.compose.runtime.LaunchedEffect
-import androidx.compose.runtime.mutableStateOf
-import androidx.compose.runtime.remember
-import androidx.compose.runtime.setValue
-import androidx.core.content.ContextCompat
-import com.google.android.gms.location.LocationServices
-
+import org.osmdroid.config.Configuration
+import org.osmdroid.tileprovider.tilesource.TileSourceFactory
+import org.osmdroid.util.GeoPoint
+import org.osmdroid.views.MapView
+import org.osmdroid.views.overlay.Marker
+import org.osmdroid.views.overlay.mylocation.MyLocationNewOverlay
 
 @Composable
 fun HomeScreen(
@@ -79,9 +89,47 @@ fun HomeScreen(
     viewModel: HomeViewModel = hiltViewModel()
 ) {
     val uiState by viewModel.uiState.collectAsStateWithLifecycle()
-    val reportsForMap by viewModel.reportsForMap.collectAsStateWithLifecycle()
-    val isLoadingMap by viewModel.isLoadingMap.collectAsStateWithLifecycle()
+    val reports by viewModel.reports.collectAsStateWithLifecycle()
+    val isLoading by viewModel.isLoading.collectAsStateWithLifecycle()
     val mapError by viewModel.mapError.collectAsStateWithLifecycle()
+    val shouldShowMap by viewModel.shouldShowMap.collectAsStateWithLifecycle()
+    val userLocation by viewModel.userLocation.collectAsStateWithLifecycle()
+    val hasLocationPermission by viewModel.hasLocationPermission.collectAsStateWithLifecycle()
+    val showPermissionDeniedDialog by viewModel.showPermissionDeniedDialog.collectAsStateWithLifecycle()
+
+    val context = LocalContext.current
+
+    fun hasLocationPermissionNow(): Boolean =
+        ContextCompat.checkSelfPermission(
+            context,
+            Manifest.permission.ACCESS_FINE_LOCATION
+        ) == PackageManager.PERMISSION_GRANTED ||
+                ContextCompat.checkSelfPermission(
+                    context,
+                    Manifest.permission.ACCESS_COARSE_LOCATION
+                ) == PackageManager.PERMISSION_GRANTED
+
+    LaunchedEffect(Unit) {
+        val granted = hasLocationPermissionNow()
+        viewModel.syncLocationPermission(granted)
+        if (granted) {
+            viewModel.getCurrentLocation(context)
+        }
+    }
+
+    val locationPermissionLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.RequestPermission()
+    ) { granted ->
+        viewModel.onLocationPermissionResult(granted, context)
+    }
+
+    val requestLocationPermission: () -> Unit = {
+        if (hasLocationPermissionNow()) {
+            viewModel.onLocationPermissionResult(true, context)
+        } else {
+            locationPermissionLauncher.launch(Manifest.permission.ACCESS_FINE_LOCATION)
+        }
+    }
 
     Scaffold(
         topBar = {
@@ -101,13 +149,12 @@ fun HomeScreen(
             )
         },
         floatingActionButton = {
-            
             if (uiState.selectedTab == HomeTab.MAP) {
                 MapReportFab(onClick = onNavigateToCreateReport)
             }
         },
         floatingActionButtonPosition = FabPosition.Center,
-        containerColor = Color.Transparent
+        containerColor = ComposeColor.Transparent
     ) { paddingValues ->
         Box(
             modifier = Modifier
@@ -122,19 +169,21 @@ fun HomeScreen(
             when (uiState.selectedTab) {
                 HomeTab.HOME -> HomeContent(
                     state = uiState,
+                    userLocation = userLocation,
                     onReportClick = onReportClick,
-                    onAlertsBannerClick = {
-                        viewModel.onTabSelected(HomeTab.ALERTS)
-                    },
-                    onSeeAllReportsClick = {  }
+                    onAlertsBannerClick = { viewModel.onTabSelected(HomeTab.ALERTS) },
+                    onSeeAllReportsClick = { viewModel.onTabSelected(HomeTab.MAP) }
                 )
 
                 HomeTab.MAP -> MapContent(
-                    reports = reportsForMap,
-                    isLoading = isLoadingMap,
+                    reports = reports,
+                    isLoading = isLoading,
                     errorMessage = mapError,
-                    onMarkerClick = onReportClick,
-                    onRetry = viewModel::loadReports
+                    shouldShowMap = shouldShowMap,
+                    hasLocationPermission = hasLocationPermission,
+                    userLocation = userLocation,
+                    onLocationPermissionRequest = requestLocationPermission,
+                    onMarkerClick = onReportClick
                 )
 
                 HomeTab.ALERTS -> AlertsContent(
@@ -154,8 +203,39 @@ fun HomeScreen(
             }
         }
     }
-}
 
+    if (showPermissionDeniedDialog) {
+        AlertDialog(
+            onDismissRequest = viewModel::dismissPermissionDialog,
+            title = { Text("Permiso de ubicación requerido") },
+            text = {
+                Text(
+                    "Para mostrar el mapa y los reportes cercanos necesitamos acceso a tu " +
+                            "ubicación. Habilita el permiso en la configuración de la aplicación."
+                )
+            },
+            confirmButton = {
+                TextButton(
+                    onClick = {
+                        viewModel.dismissPermissionDialog()
+                        val intent = Intent(
+                            Settings.ACTION_APPLICATION_DETAILS_SETTINGS,
+                            Uri.fromParts("package", context.packageName, null)
+                        ).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                        context.startActivity(intent)
+                    }
+                ) {
+                    Text("Abrir configuración")
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = viewModel::dismissPermissionDialog) {
+                    Text("Cancelar")
+                }
+            }
+        )
+    }
+}
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -177,14 +257,13 @@ private fun HomeTopBar(
         },
         actions = {
             if (selectedTab == HomeTab.MAP) {
-                IconButton(onClick = {  }) {
+                IconButton(onClick = { }) {
                     Icon(
                         imageVector = Icons.AutoMirrored.Filled.KeyboardArrowRight,
                         contentDescription = "Filtros",
                         tint = BrandColors.TextSecondary,
                         modifier = Modifier.size(22.dp)
                     )
-                    
                 }
             }
 
@@ -214,18 +293,25 @@ private fun HomeTopBar(
                 onClick = onProfileClick
             )
         },
-        colors = TopAppBarDefaults.topAppBarColors(containerColor = Color.Transparent)
+        colors = TopAppBarDefaults.topAppBarColors(containerColor = ComposeColor.Transparent)
     )
 }
-
 
 @Composable
 private fun HomeContent(
     state: HomeUiState,
+    userLocation: GeoPoint?,
     onReportClick: (String) -> Unit,
     onAlertsBannerClick: () -> Unit,
     onSeeAllReportsClick: () -> Unit
 ) {
+    var reportsPage by remember { mutableStateOf(0) }
+    val pageCount = maxOf(
+        1,
+        (state.recentReports.size + REPORTS_PER_PAGE - 1) / REPORTS_PER_PAGE
+    )
+    val currentPage = reportsPage.coerceIn(0, pageCount - 1)
+
     Column(
         modifier = Modifier
             .fillMaxSize()
@@ -265,120 +351,116 @@ private fun HomeContent(
                 message = "Cuando la comunidad publique mascotas perdidas o encontradas cerca de ti, aparecerán aquí."
             )
         } else {
-            state.recentReports.forEach { report ->
+            val visibleReports = state.recentReports
+                .drop(currentPage * REPORTS_PER_PAGE)
+                .take(REPORTS_PER_PAGE)
+
+            visibleReports.forEach { report ->
                 PetReportCard(
                     report = report,
+                    userLocation = userLocation,
                     onClick = { onReportClick(report.id) }
                 )
+            }
+
+            if (pageCount > 1) {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    OutlinedButton(
+                        onClick = { reportsPage = currentPage - 1 },
+                        enabled = currentPage > 0
+                    ) {
+                        Text("Anterior")
+                    }
+                    Text(
+                        text = "Página ${currentPage + 1} de $pageCount",
+                        style = MaterialTheme.typography.labelMedium,
+                        color = BrandColors.TextSecondary
+                    )
+                    OutlinedButton(
+                        onClick = { reportsPage = currentPage + 1 },
+                        enabled = currentPage < pageCount - 1
+                    ) {
+                        Text("Siguiente")
+                    }
+                }
             }
         }
     }
 }
-
 
 @Composable
 private fun MapContent(
     reports: List<Report>,
     isLoading: Boolean,
     errorMessage: String?,
-    onMarkerClick: (String) -> Unit,
-    onRetry: () -> Unit
+    shouldShowMap: Boolean,
+    hasLocationPermission: Boolean,
+    userLocation: GeoPoint?,
+    onLocationPermissionRequest: () -> Unit,
+    onMarkerClick: (String) -> Unit
 ) {
-    val context = androidx.compose.ui.platform.LocalContext.current
-    var currentLocation by remember { mutableStateOf<LatLng?>(null) }
-    var hasCenteredOnUser by remember { mutableStateOf(false) }
+    var mapInstance by remember { mutableStateOf<MapView?>(null) }
 
-    val fusedLocationClient = remember {
-        LocationServices.getFusedLocationProviderClient(context)
-    }
-
-    @SuppressLint("MissingPermission")
-    fun fetchUserLocation() {
-        if (ContextCompat.checkSelfPermission(
-                context,
-                Manifest.permission.ACCESS_FINE_LOCATION
-            ) != PackageManager.PERMISSION_GRANTED
-        ) {
-            return
+    LaunchedEffect(userLocation) {
+        val location = userLocation ?: return@LaunchedEffect
+        mapInstance?.controller?.apply {
+            setZoom(16.0)
+            setCenter(location)
         }
-
-        val currentLocationRequest = com.google.android.gms.location.CurrentLocationRequest.Builder()
-            .setPriority(com.google.android.gms.location.Priority.PRIORITY_HIGH_ACCURACY)
-            .build()
-
-        fusedLocationClient.getCurrentLocation(currentLocationRequest, null)
-            .addOnSuccessListener { location ->
-                if (location != null) {
-                    currentLocation = LatLng(location.latitude, location.longitude)
-                }
-            }
-            .addOnFailureListener { _ ->
-                fusedLocationClient.lastLocation
-                    .addOnSuccessListener { cachedLocation ->
-                        if (cachedLocation != null) {
-                            currentLocation = LatLng(cachedLocation.latitude, cachedLocation.longitude)
-                        }
-                    }
-            }
-    }
-
-    val locationPermissionLauncher = rememberLauncherForActivityResult(
-        contract = ActivityResultContracts.RequestPermission()
-    ) { granted ->
-        if (granted) {
-            fetchUserLocation()
-        }
-    }
-
-    val cameraPositionState = rememberCameraPositionState {
-        position = CameraPosition.fromLatLngZoom(DEFAULT_MAP_CENTER, 12f)
-    }
-
-    LaunchedEffect(Unit) {
-        if (ContextCompat.checkSelfPermission(
-                context,
-                Manifest.permission.ACCESS_FINE_LOCATION
-            ) == PackageManager.PERMISSION_GRANTED
-        ) {
-            fetchUserLocation()
-        } else {
-            locationPermissionLauncher.launch(Manifest.permission.ACCESS_FINE_LOCATION)
-        }
-    }
-
-    LaunchedEffect(currentLocation) {
-        val userLocation = currentLocation ?: return@LaunchedEffect
-        if (!hasCenteredOnUser) {
-            cameraPositionState.position =
-                CameraPosition.fromLatLngZoom(userLocation, 13f)
-            hasCenteredOnUser = true
-        }
-    }
-
-    fun currentCenter(): LatLng {
-        val located = reports.firstOrNull { it.latitude != null && it.longitude != null }
-        return located?.let { LatLng(it.latitude!!, it.longitude!!) } ?: DEFAULT_MAP_CENTER
     }
 
     Box(modifier = Modifier.fillMaxSize()) {
-        GoogleMap(
-            modifier = Modifier.fillMaxSize(),
-            cameraPositionState = cameraPositionState
-        ) {
-            reports.forEach { report ->
-                val lat = report.latitude
-                val lon = report.longitude
-                if (lat != null && lon != null) {
-                    val icon = remember(report.status) { getMarkerIcon(report.status) }
-                    Marker(
-                        state = MarkerState(position = LatLng(lat, lon)),
-                        title = report.petName,
-                        snippet = report.status,
-                        icon = icon,
-                        onInfoWindowClick = { onMarkerClick(report.id.orEmpty()) }
-                    )
+        if (!shouldShowMap) {
+            MapActivationPlaceholder(modifier = Modifier.fillMaxSize())
+        } else {
+            AndroidView(
+                factory = { ctx ->
+                    Configuration.getInstance().userAgentValue = ctx.packageName
+                    val map = MapView(ctx).apply {
+                        setTileSource(TileSourceFactory.MAPNIK)
+                        setMultiTouchControls(true)
+                        setBuiltInZoomControls(true)
+                        controller.setZoom(12.0)
+                    }
+                    if (hasLocationPermission) {
+                        map.overlays.add(
+                            MyLocationNewOverlay(map).apply {
+                                enableMyLocation()
+                            }
+                        )
+                    }
+                    mapInstance = map
+                    map
+                },
+                modifier = Modifier.fillMaxSize(),
+                update = { mapView ->
+                    mapView.overlays.removeAll { it is Marker && it.id == REPORT_MARKER_ID }
+
+                    reports.forEach { report ->
+                        if (report.latitude != null && report.longitude != null) {
+                            val marker = Marker(mapView).apply {
+                                id = REPORT_MARKER_ID
+                                position = GeoPoint(report.latitude, report.longitude)
+                                title = report.petName
+                                snippet = "${report.status}\n${report.description}"
+                                icon = getMarkerDrawable(report.status)
+                                setAnchor(Marker.ANCHOR_CENTER, Marker.ANCHOR_BOTTOM)
+                                setOnMarkerClickListener { _, _ ->
+                                    onMarkerClick(report.id.orEmpty())
+                                    true
+                                }
+                            }
+                            mapView.overlays.add(marker)
+                        }
+                    }
+
+                    mapView.invalidate()
                 }
-            }
+            )
         }
 
         if (errorMessage != null) {
@@ -386,13 +468,14 @@ private fun MapContent(
                 text = errorMessage,
                 style = MaterialTheme.typography.bodyMedium,
                 color = BrandColors.Accent,
+                textAlign = TextAlign.Center,
                 modifier = Modifier
                     .align(Alignment.TopCenter)
                     .padding(16.dp)
             )
         }
 
-        if (isLoading) {
+        if (shouldShowMap && isLoading) {
             CircularProgressIndicator(
                 modifier = Modifier
                     .align(Alignment.Center)
@@ -400,7 +483,7 @@ private fun MapContent(
             )
         }
 
-        if (!isLoading && errorMessage == null &&
+        if (shouldShowMap && !isLoading && errorMessage == null &&
             reports.none { it.latitude != null && it.longitude != null }
         ) {
             Card(
@@ -420,17 +503,95 @@ private fun MapContent(
         }
 
         MapRecenterButton(
-            onClick = {
-                val target = currentLocation ?: currentCenter()
-                cameraPositionState.position = CameraPosition.fromLatLngZoom(target, 13f)
-            },
+            onClick = onLocationPermissionRequest,
             modifier = Modifier
                 .align(Alignment.BottomEnd)
                 .padding(end = 20.dp, bottom = 24.dp)
         )
+
+        if (!shouldShowMap && errorMessage == null) {
+            Text(
+                text = "Toca el botón de ubicación para activar el mapa",
+                style = MaterialTheme.typography.labelSmall,
+                color = BrandColors.TextSecondary,
+                modifier = Modifier
+                    .align(Alignment.BottomEnd)
+                    .padding(end = 24.dp, bottom = 88.dp)
+            )
+        }
     }
 }
 
+private const val REPORT_MARKER_ID = "buscando_huellas_report_marker"
+private const val REPORTS_PER_PAGE = 5
+
+@Composable
+private fun MapActivationPlaceholder(modifier: Modifier = Modifier) {
+    Box(
+        modifier = modifier
+            .background(BrandColors.MapBackground)
+            .padding(32.dp),
+        contentAlignment = Alignment.Center
+    ) {
+        Column(
+            horizontalAlignment = Alignment.CenterHorizontally,
+            verticalArrangement = Arrangement.spacedBy(16.dp)
+        ) {
+            Icon(
+                imageVector = Icons.Filled.Map,
+                contentDescription = null,
+                tint = BrandColors.Primary,
+                modifier = Modifier.size(72.dp)
+            )
+            Text(
+                text = "Tu ubicación está apagada",
+                style = MaterialTheme.typography.headlineSmall,
+                fontWeight = FontWeight.Bold,
+                color = BrandColors.TextPrimary,
+                textAlign = TextAlign.Center
+            )
+            Text(
+                text = "Actívala para ver los reportes de mascotas perdidas y encontradas cerca de ti en el mapa.",
+                style = MaterialTheme.typography.bodyMedium,
+                color = BrandColors.TextSecondary,
+                textAlign = TextAlign.Center
+            )
+        }
+    }
+}
+
+private fun getMarkerDrawable(status: String): Drawable {
+    val color = when (status.uppercase()) {
+        "LOST" -> Color.RED
+        "FOUND" -> Color.GREEN
+        "SIGHTED" -> Color.BLUE
+        "USER" -> Color.BLUE
+        else -> Color.GRAY
+    }
+
+    val size = 80
+    val bitmap = Bitmap.createBitmap(size, size, Bitmap.Config.ARGB_8888)
+    val canvas = Canvas(bitmap)
+
+    val paint = Paint().apply {
+        this.color = color
+        style = Paint.Style.FILL
+        isAntiAlias = true
+    }
+
+    val borderPaint = Paint().apply {
+        this.color = Color.WHITE
+        style = Paint.Style.STROKE
+        strokeWidth = 6f
+        isAntiAlias = true
+    }
+
+    val radius = (size / 2f) - 3f
+    canvas.drawCircle(size / 2f, size / 2f, radius, paint)
+    canvas.drawCircle(size / 2f, size / 2f, radius, borderPaint)
+
+    return BitmapDrawable(android.content.res.Resources.getSystem(), bitmap)
+}
 
 @Composable
 private fun AlertsContent(
@@ -501,7 +662,6 @@ private fun AlertsContent(
     }
 }
 
-
 @Composable
 private fun ProfileContent(
     profile: UserProfileUi,
@@ -522,7 +682,6 @@ private fun ProfileContent(
             modifier = Modifier.padding(horizontal = 20.dp),
             verticalArrangement = Arrangement.spacedBy(16.dp)
         ) {
-            
             Card(
                 shape = RoundedCornerShape(16.dp),
                 colors = CardDefaults.cardColors(containerColor = BrandColors.Surface),
@@ -540,7 +699,6 @@ private fun ProfileContent(
         }
     }
 }
-
 
 @Composable
 private fun ProfileHeader(profile: UserProfileUi, onEditProfileClick: () -> Unit) {
@@ -612,13 +770,13 @@ private fun ProfileHeader(profile: UserProfileUi, onEditProfileClick: () -> Unit
     }
 }
 
-
 @androidx.compose.ui.tooling.preview.Preview(showBackground = true, heightDp = 900)
 @Composable
 private fun HomeContentPreview() {
     MaterialTheme {
         HomeContent(
             state = dummyHomeUiState(),
+            userLocation = GeoPoint(-25.7535, -57.2533),
             onReportClick = {},
             onAlertsBannerClick = {},
             onSeeAllReportsClick = {}
@@ -676,16 +834,11 @@ private fun MapContentPreview() {
             ),
             isLoading = false,
             errorMessage = null,
-            onMarkerClick = {},
-            onRetry = {}
+            shouldShowMap = false,
+            hasLocationPermission = false,
+            userLocation = null,
+            onLocationPermissionRequest = {},
+            onMarkerClick = {}
         )
     }
-}
-
-private val DEFAULT_MAP_CENTER = LatLng(0.0, 0.0)
-
-private fun getMarkerIcon(status: String): BitmapDescriptor = when (status.uppercase()) {
-    "FOUND" -> BitmapDescriptorFactory.defaultMarker(BitmapDescriptorFactory.HUE_GREEN)
-    "SIGHTED" -> BitmapDescriptorFactory.defaultMarker(BitmapDescriptorFactory.HUE_AZURE)
-    else -> BitmapDescriptorFactory.defaultMarker(BitmapDescriptorFactory.HUE_RED)
 }

@@ -8,6 +8,7 @@ data class Report(
     val description: String,
     val status: String = "LOST",
     val imageUrl: String? = null,
+    val location: String? = null,
     val latitude: Double? = null,
     val longitude: Double? = null
 )

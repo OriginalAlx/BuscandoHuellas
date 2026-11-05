@@ -1,6 +1,15 @@
 package com.app.buscandohuellas.ui.screens.createReport
 
+import android.Manifest
+import android.content.Context
+import android.content.Intent
 import android.content.pm.PackageManager
+import android.location.LocationManager
+import android.provider.Settings
+import android.widget.Toast
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -14,8 +23,12 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Close
+import androidx.compose.material.icons.filled.GpsFixed
+import androidx.compose.material.icons.filled.LocationOff
+import androidx.compose.material.icons.filled.LocationOn
 import androidx.compose.material.icons.filled.MyLocation
 import androidx.compose.material.icons.filled.Place
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.CircularProgressIndicator
@@ -27,8 +40,10 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -36,75 +51,248 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
-import com.google.android.gms.maps.CameraUpdateFactory
-import com.google.android.gms.maps.model.CameraPosition
-import com.google.android.gms.maps.model.LatLng
-import com.google.maps.android.compose.GoogleMap
-import com.google.maps.android.compose.Marker
-import com.google.maps.android.compose.MarkerState
-import com.google.maps.android.compose.rememberCameraPositionState
+import androidx.compose.ui.viewinterop.AndroidView
+import androidx.core.content.ContextCompat
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.LifecycleEventObserver
+import androidx.lifecycle.compose.LocalLifecycleOwner
+import org.osmdroid.events.MapEventsReceiver
+import org.osmdroid.tileprovider.tilesource.TileSourceFactory
+import org.osmdroid.util.GeoPoint
+import org.osmdroid.views.MapView
+import org.osmdroid.views.overlay.MapEventsOverlay
+import org.osmdroid.views.overlay.Marker
+import org.osmdroid.views.overlay.mylocation.MyLocationNewOverlay
 import java.util.Locale
-
-
-private val DEFAULT_LOCATION = LatLng(0.0, 0.0)
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun MapPickerScreen(
-    
     initialLatitude: Double?,
     initialLongitude: Double?,
-    
     currentLatitude: Double?,
     currentLongitude: Double?,
-    
     isLocating: Boolean,
-    
     onUseCurrentLocation: () -> Unit,
-    
     onConfirm: (latitude: Double, longitude: Double) -> Unit,
-    
     onCancel: () -> Unit
 ) {
     val context = LocalContext.current
+    val locationManager = remember {
+        context.getSystemService(Context.LOCATION_SERVICE) as LocationManager
+    }
 
-    
-    val hasMapApiKey = remember {
-        try {
-            val appInfo = context.packageManager.getApplicationInfo(
-                context.packageName,
-                PackageManager.GET_META_DATA
-            )
-            val key = appInfo.metaData?.getString("com.google.android.geo.API_KEY")
-            !key.isNullOrBlank()
-        } catch (error: Exception) {
-            false
+    fun isGpsEnabled(): Boolean = runCatching {
+        locationManager.isProviderEnabled(LocationManager.GPS_PROVIDER)
+    }.getOrDefault(false)
+
+    fun hasLocationPermission(): Boolean =
+        ContextCompat.checkSelfPermission(
+            context,
+            Manifest.permission.ACCESS_FINE_LOCATION
+        ) == PackageManager.PERMISSION_GRANTED ||
+            ContextCompat.checkSelfPermission(
+                context,
+                Manifest.permission.ACCESS_COARSE_LOCATION
+            ) == PackageManager.PERMISSION_GRANTED
+
+    fun initialPoint(): GeoPoint? = when {
+        initialLatitude != null && initialLongitude != null ->
+            GeoPoint(initialLatitude, initialLongitude)
+
+        currentLatitude != null && currentLongitude != null ->
+            GeoPoint(currentLatitude, currentLongitude)
+
+        else -> null
+    }
+
+    var gpsEnabled by remember { mutableStateOf(isGpsEnabled()) }
+    var locationPermissionGranted by remember { mutableStateOf(hasLocationPermission()) }
+    var showGpsDialog by remember { mutableStateOf(false) }
+    var mapInstance by remember { mutableStateOf<MapView?>(null) }
+    var myLocationOverlay by remember { mutableStateOf<MyLocationNewOverlay?>(null) }
+    var centeredOnUser by remember { mutableStateOf(false) }
+    var selectedPoint by remember { mutableStateOf(initialPoint()) }
+
+    val permissionLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.RequestMultiplePermissions()
+    ) { result ->
+        val granted = result[Manifest.permission.ACCESS_FINE_LOCATION] == true ||
+            result[Manifest.permission.ACCESS_COARSE_LOCATION] == true ||
+            hasLocationPermission()
+
+        locationPermissionGranted = granted
+
+        if (!granted) {
+            Toast.makeText(
+                context,
+                "El permiso de ubicación es necesario para centrar el mapa en tu posición.",
+                Toast.LENGTH_LONG
+            ).show()
+            return@rememberLauncherForActivityResult
+        }
+
+        val gpsNowEnabled = isGpsEnabled()
+        gpsEnabled = gpsNowEnabled
+
+        if (gpsNowEnabled) {
+            onUseCurrentLocation()
+        } else {
+            showGpsDialog = true
         }
     }
 
-    
-    val startTarget = LatLng(
-        initialLatitude ?: currentLatitude ?: DEFAULT_LOCATION.latitude,
-        initialLongitude ?: currentLongitude ?: DEFAULT_LOCATION.longitude
-    )
-
-    
-    val cameraPositionState = rememberCameraPositionState {
-        position = CameraPosition.fromLatLngZoom(startTarget, 14f)
+    fun requestLocationPermissions() {
+        permissionLauncher.launch(
+            arrayOf(
+                Manifest.permission.ACCESS_FINE_LOCATION,
+                Manifest.permission.ACCESS_COARSE_LOCATION
+            )
+        )
     }
 
-    
-    val markerState = remember { MarkerState(startTarget) }
+    fun openLocationSettings() {
+        val intent = Intent(Settings.ACTION_LOCATION_SOURCE_SETTINGS)
+            .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+        runCatching { context.startActivity(intent) }
+            .onFailure {
+                Toast.makeText(
+                    context,
+                    "No se pudo abrir la configuración de ubicación.",
+                    Toast.LENGTH_SHORT
+                ).show()
+            }
+    }
 
-    
+    fun requestLocationAccess() {
+        val gpsNowEnabled = isGpsEnabled()
+        gpsEnabled = gpsNowEnabled
+
+        when {
+            !gpsNowEnabled -> showGpsDialog = true
+            !hasLocationPermission() -> requestLocationPermissions()
+            else -> {
+                locationPermissionGranted = true
+                onUseCurrentLocation()
+            }
+        }
+    }
+
+    fun focusOnUserLocation() {
+        if (!isGpsEnabled()) {
+            gpsEnabled = false
+            showGpsDialog = true
+            return
+        }
+        if (!hasLocationPermission()) {
+            requestLocationPermissions()
+            return
+        }
+
+        val userPoint = myLocationOverlay?.myLocation
+        if (userPoint != null) {
+            mapInstance?.controller?.animateTo(userPoint)
+            mapInstance?.controller?.setZoom(16.0)
+        } else {
+            onUseCurrentLocation()
+        }
+    }
+
+    val lifecycleOwner = LocalLifecycleOwner.current
+    DisposableEffect(lifecycleOwner) {
+        val observer = LifecycleEventObserver { _, event ->
+            if (event == Lifecycle.Event.ON_RESUME) {
+                val gpsNowEnabled = isGpsEnabled()
+                gpsEnabled = gpsNowEnabled
+                locationPermissionGranted = hasLocationPermission()
+
+                when {
+                    !gpsNowEnabled -> showGpsDialog = true
+                    locationPermissionGranted -> onUseCurrentLocation()
+                }
+            }
+        }
+        lifecycleOwner.lifecycle.addObserver(observer)
+        onDispose { lifecycleOwner.lifecycle.removeObserver(observer) }
+    }
+
+    LaunchedEffect(Unit) {
+        val gpsNowEnabled = isGpsEnabled()
+        gpsEnabled = gpsNowEnabled
+
+        when {
+            !gpsNowEnabled -> showGpsDialog = true
+            !hasLocationPermission() -> requestLocationPermissions()
+            else -> onUseCurrentLocation()
+        }
+    }
+
+    LaunchedEffect(gpsEnabled, locationPermissionGranted) {
+        val map = mapInstance ?: return@LaunchedEffect
+        if (gpsEnabled && locationPermissionGranted) {
+            if (myLocationOverlay == null) {
+                val overlay = MyLocationNewOverlay(map)
+                overlay.enableMyLocation()
+                overlay.runOnFirstFix {
+                    overlay.myLocation?.let { point ->
+                        map.controller.setCenter(point)
+                        map.controller.setZoom(16.0)
+                    }
+                }
+                myLocationOverlay = overlay
+                map.overlays.add(overlay)
+            }
+            if (!centeredOnUser) {
+                onUseCurrentLocation()
+                centeredOnUser = true
+            }
+        }
+    }
+
     LaunchedEffect(currentLatitude, currentLongitude) {
         if (currentLatitude != null && currentLongitude != null) {
-            val current = LatLng(currentLatitude, currentLongitude)
-            markerState.position = current
-            cameraPositionState.move(CameraUpdateFactory.newLatLngZoom(current, 15f))
+            val point = GeoPoint(currentLatitude, currentLongitude)
+            selectedPoint = point
+            mapInstance?.controller?.animateTo(point)
         }
+    }
+
+    if (showGpsDialog) {
+        AlertDialog(
+            onDismissRequest = { showGpsDialog = false },
+            icon = {
+                Icon(
+                    imageVector = Icons.Filled.LocationOff,
+                    contentDescription = null
+                )
+            },
+            title = { Text("Activa el GPS") },
+            text = {
+                Text(
+                    "La ubicación del dispositivo está desactivada. Actívala para centrar el " +
+                        "mapa en tu posición actual."
+                )
+            },
+            confirmButton = {
+                TextButton(
+                    onClick = {
+                        showGpsDialog = false
+                        openLocationSettings()
+                    }
+                ) {
+                    Text("Activar GPS")
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { showGpsDialog = false }) {
+                    Text("Cancelar")
+                }
+            }
+        )
     }
 
     Scaffold(
@@ -120,31 +308,109 @@ fun MapPickerScreen(
             )
         }
     ) { paddingValues ->
-        if (!hasMapApiKey) {
-            
-            NoApiKeyContent(modifier = Modifier.padding(paddingValues))
-            return@Scaffold
-        }
-
         Box(
             modifier = Modifier
                 .fillMaxSize()
                 .padding(paddingValues)
         ) {
-            GoogleMapView(
-                cameraPositionState = cameraPositionState,
-                markerState = markerState,
-                onMapClick = { latLng ->
-                    
-                    markerState.position = latLng
+            AndroidView(
+                factory = { ctx ->
+                    MapView(ctx).apply {
+                        setTileSource(TileSourceFactory.MAPNIK)
+                        setMultiTouchControls(true)
+                        setBuiltInZoomControls(true)
+
+                        val startPoint = selectedPoint
+                        if (startPoint != null) {
+                            controller.setZoom(16.0)
+                            controller.setCenter(startPoint)
+                        } else {
+                            controller.setZoom(2.0)
+                        }
+
+                        val marker = Marker(this).apply {
+                            position = startPoint ?: GeoPoint(0.0, 0.0)
+                            isEnabled = startPoint != null
+                            setAnchor(Marker.ANCHOR_CENTER, Marker.ANCHOR_BOTTOM)
+                            isDraggable = true
+                            setOnMarkerDragListener(object : Marker.OnMarkerDragListener {
+                                override fun onMarkerDrag(p0: Marker?) {}
+
+                                override fun onMarkerDragEnd(p0: Marker?) {
+                                    p0?.let { selectedPoint = it.position }
+                                }
+
+                                override fun onMarkerDragStart(p0: Marker?) {}
+                            })
+                        }
+                        overlays.add(marker)
+
+                        val mapEventsOverlay = MapEventsOverlay(object : MapEventsReceiver {
+                            override fun singleTapConfirmedHelper(p: GeoPoint?): Boolean {
+                                p?.let {
+                                    selectedPoint = it
+                                    marker.position = it
+                                    marker.isEnabled = true
+                                }
+                                return true
+                            }
+
+                            override fun longPressHelper(p: GeoPoint?): Boolean = false
+                        })
+                        overlays.add(mapEventsOverlay)
+
+                        mapInstance = this
+                    }
+                },
+                update = { mapView ->
+                    if (gpsEnabled && locationPermissionGranted && myLocationOverlay == null) {
+                        val overlay = MyLocationNewOverlay(mapView)
+                        overlay.enableMyLocation()
+                        overlay.runOnFirstFix {
+                            overlay.myLocation?.let { point ->
+                                mapView.controller.setCenter(point)
+                                mapView.controller.setZoom(16.0)
+                            }
+                        }
+                        myLocationOverlay = overlay
+                        mapView.overlays.add(overlay)
+                    }
+
+                    val currentMarker = mapView.overlays.find { it is Marker } as? Marker
+                    val point = selectedPoint
+                    if (currentMarker != null && point != null) {
+                        currentMarker.position = point
+                        currentMarker.isEnabled = true
+                    }
+                    mapView.invalidate()
                 }
             )
 
-            
+            if (!locationPermissionGranted) {
+                LocationPermissionOverlay(
+                    onRequestPermission = { requestLocationAccess() },
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .align(Alignment.Center)
+                )
+            }
+
             FloatingActionButton(
-                onClick = onUseCurrentLocation,
+                onClick = {
+                    when {
+                        !isGpsEnabled() -> {
+                            gpsEnabled = false
+                            showGpsDialog = true
+                        }
+
+                        !hasLocationPermission() -> requestLocationPermissions()
+                        else -> focusOnUserLocation()
+                    }
+                },
+                containerColor = Color(0xFF2196F3),
+                contentColor = Color.White,
                 modifier = Modifier
-                    .align(Alignment.TopEnd)
+                    .align(Alignment.BottomEnd)
                     .padding(16.dp)
             ) {
                 if (isLocating) {
@@ -155,12 +421,11 @@ fun MapPickerScreen(
                 } else {
                     Icon(
                         imageVector = Icons.Filled.MyLocation,
-                        contentDescription = "Usar mi ubicación actual"
+                        contentDescription = "Centrar en mi ubicación"
                     )
                 }
             }
 
-            
             Card(
                 modifier = Modifier
                     .align(Alignment.BottomCenter)
@@ -187,8 +452,10 @@ fun MapPickerScreen(
                     }
 
                     Text(
-                        text = "Ubicación: ${formatCoordPrecise(markerState.position.latitude)}, " +
-                            formatCoordPrecise(markerState.position.longitude),
+                        text = selectedPoint?.let {
+                            "Ubicación: ${formatCoordPrecise(it.latitude)}, " +
+                                formatCoordPrecise(it.longitude)
+                        } ?: "Aún no hay una ubicación seleccionada. Usa el botón de ubicación o toca el mapa.",
                         style = MaterialTheme.typography.bodyMedium,
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
@@ -205,11 +472,11 @@ fun MapPickerScreen(
                         }
                         Button(
                             onClick = {
-                                onConfirm(
-                                    markerState.position.latitude,
-                                    markerState.position.longitude
-                                )
+                                selectedPoint?.let {
+                                    onConfirm(it.latitude, it.longitude)
+                                }
                             },
+                            enabled = selectedPoint != null,
                             modifier = Modifier
                                 .weight(2f)
                                 .height(48.dp)
@@ -223,54 +490,55 @@ fun MapPickerScreen(
     }
 }
 
-
 @Composable
-private fun GoogleMapView(
-    cameraPositionState: com.google.maps.android.compose.CameraPositionState,
-    markerState: MarkerState,
-    onMapClick: (LatLng) -> Unit
+private fun LocationPermissionOverlay(
+    onRequestPermission: () -> Unit,
+    modifier: Modifier = Modifier
 ) {
-    
-    GoogleMap(
-        modifier = Modifier.fillMaxSize(),
-        cameraPositionState = cameraPositionState,
-        onMapClick = onMapClick
+    Box(
+        modifier = modifier.background(Color(0xCC10131E)),
+        contentAlignment = Alignment.Center
     ) {
-        Marker(
-            state = markerState,
-            draggable = true,
-            title = "Ubicación del reporte",
-            snippet = "Arrastra o toca el mapa para ajustar"
-        )
+        Column(
+            horizontalAlignment = Alignment.CenterHorizontally,
+            verticalArrangement = Arrangement.spacedBy(16.dp),
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 32.dp)
+        ) {
+            Icon(
+                imageVector = Icons.Filled.LocationOn,
+                contentDescription = null,
+                tint = Color.White,
+                modifier = Modifier.size(64.dp)
+            )
+            Text(
+                text = "Necesitamos tu ubicación",
+                style = MaterialTheme.typography.headlineSmall,
+                color = Color.White,
+                textAlign = TextAlign.Center
+            )
+            Text(
+                text = "Activar la capa de ubicación nos permite centrar el mapa en tu posición " +
+                    "y sugerirle al usuario el punto más cercano de la mascota reportada.",
+                style = MaterialTheme.typography.bodyMedium,
+                color = Color(0xFFCBD5E1),
+                textAlign = TextAlign.Center
+            )
+            Button(
+                onClick = onRequestPermission,
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                Icon(
+                    imageVector = Icons.Filled.GpsFixed,
+                    contentDescription = null
+                )
+                Spacer(modifier = Modifier.width(8.dp))
+                Text("Solicitar permiso")
+            }
+        }
     }
 }
-
-
-@Composable
-private fun NoApiKeyContent(modifier: Modifier = Modifier) {
-    Column(
-        modifier = modifier
-            .fillMaxSize()
-            .padding(24.dp),
-        verticalArrangement = Arrangement.spacedBy(12.dp, Alignment.CenterVertically),
-        horizontalAlignment = Alignment.CenterHorizontally
-    ) {
-        Icon(
-            imageVector = Icons.Filled.Place,
-            contentDescription = null,
-            modifier = Modifier.size(48.dp),
-            tint = MaterialTheme.colorScheme.error
-        )
-        Text("Falta la API Key de Google Maps", style = MaterialTheme.typography.titleMedium)
-        Text(
-            text = "Añade en local.properties:\nMAPS_API_KEY=TU_API_KEY\n\n" +
-                "Créala en https://console.cloud.google.com con la SDK \"Maps SDK for Android\" activada.",
-            style = MaterialTheme.typography.bodyMedium,
-            color = MaterialTheme.colorScheme.onSurfaceVariant
-        )
-    }
-}
-
 
 private fun formatCoordPrecise(value: Double): String =
     String.format(Locale.US, "%.6f", value)
