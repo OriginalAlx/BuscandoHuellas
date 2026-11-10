@@ -23,13 +23,16 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
 import androidx.navigation.NavHostController
+import androidx.navigation.NavType
 import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
 import androidx.navigation.compose.rememberNavController
+import androidx.navigation.navArgument
 import com.app.buscandohuellas.ui.screens.createReport.CreateReportScreen
 import com.app.buscandohuellas.ui.screens.home.HomeScreen
 import com.app.buscandohuellas.ui.screens.login.LoginScreen
 import com.app.buscandohuellas.ui.screens.register.RegisterScreen
+import com.app.buscandohuellas.ui.screens.reportDetail.ReportDetailScreen
 import com.app.buscandohuellas.ui.theme.BuscandoHuellasTheme
 import dagger.hilt.android.AndroidEntryPoint
 
@@ -110,8 +113,9 @@ fun AppNavHost(navController: NavHostController = rememberNavController()) {
             HomeScreen(
                 onNavigateToCreateReport = { navController.navigate("create_report") },
                 onReportClick = { reportId ->
-
-
+                    if (reportId.isNotBlank()) {
+                        navController.navigate("report_detail/$reportId")
+                    }
                 },
                 onProfileClick = {
 
@@ -128,6 +132,17 @@ fun AppNavHost(navController: NavHostController = rememberNavController()) {
         composable("create_report") {
             CreateReportScreen(
                 onReportCreated = { navController.popBackStack() },
+                onNavigateBack = { navController.popBackStack() }
+            )
+        }
+
+        composable(
+            route = "report_detail/{reportId}",
+            arguments = listOf(
+                navArgument("reportId") { type = NavType.StringType }
+            )
+        ) {
+            ReportDetailScreen(
                 onNavigateBack = { navController.popBackStack() }
             )
         }

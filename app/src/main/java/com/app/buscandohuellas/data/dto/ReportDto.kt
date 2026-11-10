@@ -10,6 +10,7 @@ data class ReportDto(
     @SerialName("description") val description: String?,
     @SerialName("status") val status: String,
     @SerialName("image_url") val image_url: String?,
+    @SerialName("image_urls") val image_urls: List<String>? = null,
     @SerialName("created_at") val createdAt: String? = null,
     @SerialName("location") val location: String? = null
 ) {
@@ -22,6 +23,10 @@ data class ReportDto(
             description = description ?: "",
             status = status,
             imageUrl = image_url,
+            imageUrls = image_urls
+                ?.map { it.trim() }
+                ?.filter { it.isNotBlank() }
+                ?.takeIf { it.isNotEmpty() },
             location = location,
             latitude = lat,
             longitude = lon

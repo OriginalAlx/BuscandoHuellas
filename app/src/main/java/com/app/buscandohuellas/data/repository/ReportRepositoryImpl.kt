@@ -28,6 +28,7 @@ data class ReportDto(
     @SerialName("description") val description: String,
     @SerialName("status") val status: String = "LOST",
     @SerialName("image_url") val imageUrl: String? = null,
+    @SerialName("image_urls") val imageUrls: List<String>? = null,
     @SerialName("created_at") val createdAt: String? = null,
     @SerialName("location_text") val location: String? = null
 )
@@ -129,22 +130,10 @@ class ReportRepositoryImpl @Inject constructor(
             Log.d(TAG, "PASO 3.$index: id=${dto.id}, petName=${dto.petName}, location=${dto.location}")
         }
 
-        val reports = dtos.mapNotNull { dto ->
-            val petName = dto.petName
-            val location = dto.location?.let { parsePoint(it) }
-
-            Log.d(TAG, "🔍 PASO 4: Parseando ${dto.petName} -> lat=${location?.second}, lon=${location?.first}")
-
-            Report(
-                id = dto.id,
-                userId = dto.userId,
-                petName = petName,
-                description = dto.description,
-                status = dto.status,
-                imageUrl = dto.imageUrl,
-                latitude = location?.second,
-                longitude = location?.first
-            )
+        val reports = dtos.map { dto ->
+            val report = dto.toDomain()
+            Log.d(TAG, "🔍 PASO 4: Parseando ${report.petName} -> lat=${report.latitude}, lon=${report.longitude}")
+            report
         }
 
         Log.d(TAG, "🔍 PASO 5: Reportes finales: ${reports.size}")
@@ -164,6 +153,52 @@ class ReportRepositoryImpl @Inject constructor(
     } catch (error: Exception) {
         Log.e(TAG, "Error inesperado en getAllReports", error)
         Result.failure(Exception(error.message ?: "No se pudieron cargar los reportes. Inténtalo de nuevo."))
+    }
+
+    override suspend fun getReportById(reportId: String): Result<Report> = try {
+        Log.d(TAG, "Consultando reporte por id=$reportId")
+
+        val response = supabaseClient
+            .from("reports_view")
+            .select {
+                filter { eq("id", reportId) }
+            }
+
+        val dto = response.decodeList<ReportDto>().firstOrNull()
+            ?: return Result.failure(Exception("El reporte no existe o fue eliminado."))
+
+        Result.success(dto.toDomain())
+    } catch (error: CancellationException) {
+        throw error
+    } catch (error: RestException) {
+        Log.e(TAG, "RestException en getReportById", error)
+        Result.failure(Exception(friendlyMessage(error)))
+    } catch (error: HttpRequestException) {
+        Log.e(TAG, "HttpRequestException en getReportById", error)
+        Result.failure(Exception("No hay conexión a internet. Verifica tu red e intenta de nuevo."))
+    } catch (error: Exception) {
+        Log.e(TAG, "Error inesperado en getReportById", error)
+        Result.failure(Exception(error.message ?: "No se pudo cargar el reporte. Inténtalo de nuevo."))
+    }
+
+    private fun ReportDto.toDomain(): Report {
+        val point = location?.let { parsePoint(it) }
+
+        return Report(
+            id = id,
+            userId = userId,
+            petName = petName,
+            description = description,
+            status = status,
+            imageUrl = imageUrl,
+            imageUrls = imageUrls
+                ?.map { it.trim() }
+                ?.filter { it.isNotBlank() }
+                ?.takeIf { it.isNotEmpty() },
+            location = location,
+            latitude = point?.second,
+            longitude = point?.first
+        )
     }
 
     private fun parsePoint(pointString: String): Pair<Double, Double>? {
