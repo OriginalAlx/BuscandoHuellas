@@ -41,6 +41,9 @@ class HomeViewModel @Inject constructor(
     private val _isLoading = MutableStateFlow(false)
     val isLoading: StateFlow<Boolean> = _isLoading.asStateFlow()
 
+    private val _isRefreshing = MutableStateFlow(false)
+    val isRefreshing: StateFlow<Boolean> = _isRefreshing.asStateFlow()
+
     private val _mapError = MutableStateFlow<String?>(null)
     val mapError: StateFlow<String?> = _mapError.asStateFlow()
 
@@ -263,7 +266,25 @@ class HomeViewModel @Inject constructor(
     fun onCreateReportClicked() = Unit
 
     fun refreshReports() {
-        loadReports()
+        viewModelScope.launch {
+            _isRefreshing.value = true
+
+            try {
+                reportRepository.getAllReports()
+                    .onSuccess { reportsList ->
+                        Log.d("HomeViewModel", "Reportes refrescados: ${reportsList.size}")
+                        _reports.value = reportsList
+                        _mapError.value = null
+                        updateRecentReports()
+                    }
+                    .onFailure { error ->
+                        Log.e("HomeViewModel", "Error al refrescar reportes", error)
+                        _mapError.value = error.message ?: "Error desconocido"
+                    }
+            } finally {
+                _isRefreshing.value = false
+            }
+        }
     }
 }
 

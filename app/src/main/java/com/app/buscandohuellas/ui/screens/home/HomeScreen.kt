@@ -51,6 +51,9 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.TopAppBarDefaults
+import androidx.compose.material3.pulltorefresh.PullToRefreshDefaults
+import androidx.compose.material3.pulltorefresh.pullToRefresh
+import androidx.compose.material3.pulltorefresh.rememberPullToRefreshState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -91,6 +94,7 @@ fun HomeScreen(
     val uiState by viewModel.uiState.collectAsStateWithLifecycle()
     val reports by viewModel.reports.collectAsStateWithLifecycle()
     val isLoading by viewModel.isLoading.collectAsStateWithLifecycle()
+    val isRefreshing by viewModel.isRefreshing.collectAsStateWithLifecycle()
     val mapError by viewModel.mapError.collectAsStateWithLifecycle()
     val shouldShowMap by viewModel.shouldShowMap.collectAsStateWithLifecycle()
     val userLocation by viewModel.userLocation.collectAsStateWithLifecycle()
@@ -170,6 +174,8 @@ fun HomeScreen(
                 HomeTab.HOME -> HomeContent(
                     state = uiState,
                     userLocation = userLocation,
+                    isRefreshing = isRefreshing,
+                    onRefresh = viewModel::refreshReports,
                     onReportClick = onReportClick,
                     onAlertsBannerClick = { viewModel.onTabSelected(HomeTab.ALERTS) },
                     onSeeAllReportsClick = { viewModel.onTabSelected(HomeTab.MAP) }
@@ -301,6 +307,8 @@ private fun HomeTopBar(
 private fun HomeContent(
     state: HomeUiState,
     userLocation: GeoPoint?,
+    isRefreshing: Boolean,
+    onRefresh: () -> Unit,
     onReportClick: (String) -> Unit,
     onAlertsBannerClick: () -> Unit,
     onSeeAllReportsClick: () -> Unit
@@ -311,84 +319,101 @@ private fun HomeContent(
         (state.recentReports.size + REPORTS_PER_PAGE - 1) / REPORTS_PER_PAGE
     )
     val currentPage = reportsPage.coerceIn(0, pageCount - 1)
+    val pullRefreshState = rememberPullToRefreshState()
 
-    Column(
+    Box(
         modifier = Modifier
             .fillMaxSize()
-            .verticalScroll(rememberScrollState())
-            .padding(horizontal = 20.dp)
-            .padding(bottom = 24.dp),
-        verticalArrangement = Arrangement.spacedBy(16.dp)
-    ) {
-        Text(
-            text = "BUENOS DÍAS",
-            style = MaterialTheme.typography.labelMedium,
-            letterSpacing = 1.sp,
-            color = BrandColors.TextSecondary
-        )
-        Text(
-            text = "Hola, ${state.firstName}",
-            style = MaterialTheme.typography.headlineMedium,
-            fontWeight = FontWeight.Bold,
-            color = BrandColors.TextPrimary
-        )
-
-        if (state.nearbyAlertsCount > 0) {
-            NearbyAlertsBanner(count = state.nearbyAlertsCount, onClick = onAlertsBannerClick)
-        }
-
-        SectionHeader(
-            overline = "COMUNIDAD",
-            title = "Reportes recientes",
-            actionLabel = "Ver todos",
-            onActionClick = onSeeAllReportsClick
-        )
-
-        if (state.recentReports.isEmpty()) {
-            EmptyState(
-                icon = Icons.Filled.Pets,
-                title = "Aún no hay reportes",
-                message = "Cuando la comunidad publique mascotas perdidas o encontradas cerca de ti, aparecerán aquí."
+            .pullToRefresh(
+                state = pullRefreshState,
+                isRefreshing = isRefreshing,
+                onRefresh = onRefresh
             )
-        } else {
-            val visibleReports = state.recentReports
-                .drop(currentPage * REPORTS_PER_PAGE)
-                .take(REPORTS_PER_PAGE)
+    ) {
+        Column(
+            modifier = Modifier
+                .fillMaxSize()
+                .verticalScroll(rememberScrollState())
+                .padding(horizontal = 20.dp)
+                .padding(bottom = 24.dp),
+            verticalArrangement = Arrangement.spacedBy(16.dp)
+        ) {
+            Text(
+                text = "BUENOS DÍAS",
+                style = MaterialTheme.typography.labelMedium,
+                letterSpacing = 1.sp,
+                color = BrandColors.TextSecondary
+            )
+            Text(
+                text = "Hola, ${state.firstName}",
+                style = MaterialTheme.typography.headlineMedium,
+                fontWeight = FontWeight.Bold,
+                color = BrandColors.TextPrimary
+            )
 
-            visibleReports.forEach { report ->
-                PetReportCard(
-                    report = report,
-                    userLocation = userLocation,
-                    onClick = { onReportClick(report.id) }
-                )
+            if (state.nearbyAlertsCount > 0) {
+                NearbyAlertsBanner(count = state.nearbyAlertsCount, onClick = onAlertsBannerClick)
             }
 
-            if (pageCount > 1) {
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.SpaceBetween,
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    OutlinedButton(
-                        onClick = { reportsPage = currentPage - 1 },
-                        enabled = currentPage > 0
-                    ) {
-                        Text("Anterior")
-                    }
-                    Text(
-                        text = "Página ${currentPage + 1} de $pageCount",
-                        style = MaterialTheme.typography.labelMedium,
-                        color = BrandColors.TextSecondary
+            SectionHeader(
+                overline = "COMUNIDAD",
+                title = "Reportes recientes",
+                actionLabel = "Ver todos",
+                onActionClick = onSeeAllReportsClick
+            )
+
+            if (state.recentReports.isEmpty()) {
+                EmptyState(
+                    icon = Icons.Filled.Pets,
+                    title = "Aún no hay reportes",
+                    message = "Cuando la comunidad publique mascotas perdidas o encontradas cerca de ti, aparecerán aquí."
+                )
+            } else {
+                val visibleReports = state.recentReports
+                    .drop(currentPage * REPORTS_PER_PAGE)
+                    .take(REPORTS_PER_PAGE)
+
+                visibleReports.forEach { report ->
+                    PetReportCard(
+                        report = report,
+                        userLocation = userLocation,
+                        onClick = { onReportClick(report.id) }
                     )
-                    OutlinedButton(
-                        onClick = { reportsPage = currentPage + 1 },
-                        enabled = currentPage < pageCount - 1
+                }
+
+                if (pageCount > 1) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
                     ) {
-                        Text("Siguiente")
+                        OutlinedButton(
+                            onClick = { reportsPage = currentPage - 1 },
+                            enabled = currentPage > 0
+                        ) {
+                            Text("Anterior")
+                        }
+                        Text(
+                            text = "Página ${currentPage + 1} de $pageCount",
+                            style = MaterialTheme.typography.labelMedium,
+                            color = BrandColors.TextSecondary
+                        )
+                        OutlinedButton(
+                            onClick = { reportsPage = currentPage + 1 },
+                            enabled = currentPage < pageCount - 1
+                        ) {
+                            Text("Siguiente")
+                        }
                     }
                 }
             }
         }
+
+        PullToRefreshDefaults.Indicator(
+            state = pullRefreshState,
+            isRefreshing = isRefreshing,
+            modifier = Modifier.align(Alignment.TopCenter)
+        )
     }
 }
 
@@ -777,6 +802,8 @@ private fun HomeContentPreview() {
         HomeContent(
             state = dummyHomeUiState(),
             userLocation = GeoPoint(-25.7535, -57.2533),
+            isRefreshing = false,
+            onRefresh = {},
             onReportClick = {},
             onAlertsBannerClick = {},
             onSeeAllReportsClick = {}
