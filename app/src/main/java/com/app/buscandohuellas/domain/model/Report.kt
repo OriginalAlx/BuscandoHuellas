@@ -12,7 +12,11 @@ data class Report(
     val createdAt: String? = null,
     val location: String? = null,
     val latitude: Double? = null,
-    val longitude: Double? = null
+    val longitude: Double? = null,
+    val userName: String = DEFAULT_USER_NAME,
+    val userAvatarUrl: String? = null,
+    val locationName: String? = null,
+    val reference: String? = null
 ) {
 
     val allImageUrls: List<String>
@@ -20,4 +24,8 @@ data class Report(
             .map { it.trim() }
             .filter { it.isNotBlank() }
             .distinct()
+
+    companion object {
+        const val DEFAULT_USER_NAME = "Usuario de la comunidad"
+    }
 }

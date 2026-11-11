@@ -3,7 +3,7 @@ package com.app.buscandohuellas.data.repository
 import android.content.Context
 import android.net.Uri
 import android.util.Log
-import com.app.buscandohuellas.data.dto.StringListSerializer
+import com.app.buscandohuellas.data.dto.ReportDto
 import com.app.buscandohuellas.domain.model.Report
 import com.app.buscandohuellas.domain.model.ReportImageUploadResult
 import com.app.buscandohuellas.domain.repository.ReportRepository
@@ -13,11 +13,11 @@ import io.github.jan.supabase.auth.auth
 import io.github.jan.supabase.exceptions.HttpRequestException
 import io.github.jan.supabase.exceptions.RestException
 import io.github.jan.supabase.postgrest.from
+import io.github.jan.supabase.postgrest.query.Columns
 import io.github.jan.supabase.storage.storage
+import io.ktor.client.plugins.HttpRequestTimeoutException
 import io.ktor.http.ContentType
 import kotlinx.coroutines.CancellationException
-import kotlinx.serialization.SerialName
-import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.add
 import kotlinx.serialization.json.buildJsonArray
@@ -32,21 +32,6 @@ import java.util.UUID
 import javax.inject.Inject
 
 private const val TAG = "ReportRepository"
-
-@Serializable
-data class ReportDto(
-    @SerialName("id") val id: String? = null,
-    @SerialName("user_id") val userId: String,
-    @SerialName("pet_name") val petName: String,
-    @SerialName("description") val description: String,
-    @SerialName("status") val status: String = "LOST",
-    @SerialName("image_url") val imageUrl: String? = null,
-    @SerialName("image_urls")
-    @Serializable(with = StringListSerializer::class)
-    val imageUrls: List<String>? = null,
-    @SerialName("created_at") val createdAt: String? = null,
-    @SerialName("location_text") val location: String? = null
-)
 
 class ReportRepositoryImpl @Inject constructor(
     private val supabaseClient: SupabaseClient,
@@ -240,26 +225,10 @@ class ReportRepositoryImpl @Inject constructor(
     }
 
     override suspend fun getAllReports(): Result<List<Report>> = try {
-        Log.d(TAG, "🔍 PASO 1: Iniciando consulta a reports_view...")
+        Log.d(TAG, "🔍 Iniciando consulta de reportes con perfil del reportante...")
 
-        val response = supabaseClient
-            .from("reports_view")
-            .select()
-
-        Log.d(TAG, "PASO 2: Respuesta raw de Supabase: ${response.toString().take(500)}")
-
-        val dtos = response.decodeList<ReportDto>()
-        Log.d(TAG, "PASO 3: DTOs decodificados: ${dtos.size}")
-
-        dtos.forEachIndexed { index, dto ->
-            Log.d(TAG, "PASO 3.$index: id=${dto.id}, petName=${dto.petName}, location=${dto.location}")
-        }
-
-        val reports = dtos.map { dto ->
-            val report = dto.toDomain()
-            Log.d(TAG, "🔍 PASO 4: Parseando ${report.petName} -> lat=${report.latitude}, lon=${report.longitude}")
-            report
-        }
+        val reports = selectReportDtos()
+            .map { dto -> dto.toDomain() }
 
         // Ordeno en el repositorio para que mapa e Inicio reciban la misma lista descendente por fecha.
         val sortedReports = reports
@@ -267,20 +236,16 @@ class ReportRepositoryImpl @Inject constructor(
             .sortedByDescending { it.second }
             .map { it.first }
 
-        Log.d(TAG, "🔍 PASO 5: Reportes finales: ${sortedReports.size}")
+        Log.d(TAG, "Reportes finales: ${sortedReports.size}")
         Result.success(sortedReports)
-
-    } catch (error: Exception) {
-        Log.e(TAG, "ERROR en getAllReports: ${error.message}", error)
-        Result.failure(error)
     } catch (error: CancellationException) {
         throw error
-    } catch (error: RestException) {
-        Log.e(TAG, "RestException en getAllReports", error)
-        Result.failure(Exception(friendlyMessage(error)))
     } catch (error: HttpRequestException) {
         Log.e(TAG, "HttpRequestException en getAllReports", error)
         Result.failure(Exception("No hay conexión a internet. Verifica tu red e intenta de nuevo."))
+    } catch (error: RestException) {
+        Log.e(TAG, "RestException en getAllReports", error)
+        Result.failure(Exception(friendlyMessage(error)))
     } catch (error: Exception) {
         Log.e(TAG, "Error inesperado en getAllReports", error)
         Result.failure(Exception(error.message ?: "No se pudieron cargar los reportes. Inténtalo de nuevo."))
@@ -289,48 +254,61 @@ class ReportRepositoryImpl @Inject constructor(
     override suspend fun getReportById(reportId: String): Result<Report> = try {
         Log.d(TAG, "Consultando reporte por id=$reportId")
 
-        val response = supabaseClient
-            .from("reports_view")
-            .select {
-                filter { eq("id", reportId) }
-            }
-
-        val dto = response.decodeList<ReportDto>().firstOrNull()
+        val dto = selectReportDtos(reportId).firstOrNull()
             ?: return Result.failure(Exception("El reporte no existe o fue eliminado."))
 
         Result.success(dto.toDomain())
     } catch (error: CancellationException) {
         throw error
-    } catch (error: RestException) {
-        Log.e(TAG, "RestException en getReportById", error)
-        Result.failure(Exception(friendlyMessage(error)))
     } catch (error: HttpRequestException) {
         Log.e(TAG, "HttpRequestException en getReportById", error)
         Result.failure(Exception("No hay conexión a internet. Verifica tu red e intenta de nuevo."))
+    } catch (error: RestException) {
+        Log.e(TAG, "RestException en getReportById", error)
+        Result.failure(Exception(friendlyMessage(error)))
     } catch (error: Exception) {
         Log.e(TAG, "Error inesperado en getReportById", error)
         Result.failure(Exception(error.message ?: "No se pudo cargar el reporte. Inténtalo de nuevo."))
     }
 
-    private fun ReportDto.toDomain(): Report {
-        val point = location?.let { parsePoint(it) }
-
-        return Report(
-            id = id,
-            userId = userId,
-            petName = petName,
-            description = description,
-            status = status,
-            imageUrl = imageUrl,
-            imageUrls = imageUrls
-                ?.map { it.trim() }
-                ?.filter { it.isNotBlank() }
-                ?.takeIf { it.isNotEmpty() },
-            createdAt = createdAt,
-            location = location,
-            latitude = point?.second,
-            longitude = point?.first
-        )
+    /**
+     * Consulta los reportes con el perfil del reportante embebido mediante la
+     * relación PostgREST `reports.user_id -> profiles.id`.
+     *
+     * Si la relación todavía no existe (por ejemplo, la migración SQL no se
+     * aplicó), se reintenta contra `reports_view` para no romper la pantalla.
+     */
+    private suspend fun selectReportDtos(reportId: String? = null): List<ReportDto> {
+        return try {
+            supabaseClient
+                .from(REPORTS_TABLE)
+                .select(Columns.raw(REPORTS_WITH_PROFILE_SELECT)) {
+                    if (reportId != null) {
+                        filter { eq("id", reportId) }
+                    }
+                }
+                .decodeList<ReportDto>()
+        } catch (error: CancellationException) {
+            throw error
+        } catch (error: HttpRequestTimeoutException) {
+            throw error
+        } catch (error: HttpRequestException) {
+            throw error
+        } catch (error: Exception) {
+            Log.w(
+                TAG,
+                "No se pudo embeber el perfil del reportante; se consulta reports_view",
+                error
+            )
+            supabaseClient
+                .from(REPORTS_VIEW)
+                .select {
+                    if (reportId != null) {
+                        filter { eq("id", reportId) }
+                    }
+                }
+                .decodeList<ReportDto>()
+        }
     }
 
     private fun parseCreatedAt(createdAt: String?): Instant? {
@@ -346,38 +324,6 @@ class ReportRepositoryImpl @Inject constructor(
                 Log.w(TAG, "Fecha de creación inválida: $createdAt", fallbackError)
                 null
             }
-        }
-    }
-
-    private fun parsePoint(pointString: String): Pair<Double, Double>? {
-        return try {
-            Log.d(TAG, "📍 Parseando ubicación: $pointString")
-
-            val clean = pointString
-                .substringAfter("POINT(", "")
-                .substringBefore(")")
-                .trim()
-                .replace(",", " ")
-
-            val parts = clean.split(" ").filter { it.isNotBlank() }
-            if (parts.size < 2) {
-                Log.w(TAG, "Formato de ubicación inválido: $pointString")
-                return null
-            }
-
-            val lon = parts[0].toDoubleOrNull()
-            val lat = parts[1].toDoubleOrNull()
-
-            if (lon != null && lat != null) {
-                Log.d(TAG, "Coordenadas parseadas: lat=$lat, lon=$lon")
-                lon to lat
-            } else {
-                Log.w(TAG, "⚠️ No se pudieron convertir a Double: $parts")
-                null
-            }
-        } catch (e: Exception) {
-            Log.e(TAG, "❌ Error al parsear punto: $pointString", e)
-            null
         }
     }
 
@@ -401,5 +347,15 @@ class ReportRepositoryImpl @Inject constructor(
     companion object {
         private const val BUCKET_NAME = "pet-reports"
         private const val MAX_IMAGE_SIZE_BYTES = 5 * 1024 * 1024
+
+        private const val REPORTS_TABLE = "reports"
+        private const val REPORTS_VIEW = "reports_view"
+
+        /**
+         * `profiles(...)` usa la relación PostgREST creada por la FK
+         * `reports.user_id -> profiles.id` de la migración de perfiles.
+         */
+        private const val REPORTS_WITH_PROFILE_SELECT =
+            "*,profiles(full_name,avatar_url)"
     }
 }
