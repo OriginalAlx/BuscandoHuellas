@@ -19,6 +19,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ExitToApp
 import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
+import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Home
 import androidx.compose.material.icons.filled.LocationOn
 import androidx.compose.material.icons.filled.Map
@@ -29,11 +30,14 @@ import androidx.compose.material.icons.filled.Pets
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material3.Badge
 import androidx.compose.material3.BadgedBox
+import androidx.compose.material3.Button
+import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.ExtendedFloatingActionButton
 import androidx.compose.material3.FloatingActionButtonDefaults
 import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.NavigationBar
 import androidx.compose.material3.NavigationBarItem
@@ -50,10 +54,12 @@ import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import coil.compose.AsyncImage
+import com.app.buscandohuellas.domain.model.Report
 import com.app.buscandohuellas.ui.theme.BrandColors
 import com.app.buscandohuellas.ui.utils.LocationUtils
 import org.osmdroid.util.GeoPoint
@@ -1000,4 +1006,155 @@ fun StatsDivider(modifier: Modifier = Modifier) {
         modifier = modifier.height(34.dp),
         color = BrandColors.Divider
     )
+}
+
+
+private data class MarkerStatusBadgeStyle(
+    val label: String,
+    val container: Color,
+    val content: Color
+)
+
+
+private fun markerStatusBadgeStyle(status: String): MarkerStatusBadgeStyle =
+    when (status.uppercase()) {
+        "FOUND" -> MarkerStatusBadgeStyle(
+            label = "ENCONTRADA",
+            container = BrandColors.SuccessLight,
+            content = BrandColors.Success
+        )
+
+        "SIGHTED" -> MarkerStatusBadgeStyle(
+            label = "AVISTADA",
+            container = BrandColors.InfoLight,
+            content = BrandColors.Info
+        )
+
+        else -> MarkerStatusBadgeStyle(
+            label = "PERDIDA",
+            container = BrandColors.AccentLight,
+            content = BrandColors.Accent
+        )
+    }
+
+
+/**
+ * Panel flotante que aparece sobre el mapa al tocar un marcador de huella.
+ */
+@Composable
+fun ReportMarkerPanel(
+    report: Report,
+    onClose: () -> Unit,
+    onViewDetail: () -> Unit,
+    modifier: Modifier = Modifier
+) {
+    Card(
+        modifier = modifier.fillMaxWidth(),
+        shape = RoundedCornerShape(16.dp),
+        colors = CardDefaults.cardColors(containerColor = BrandColors.Surface),
+        elevation = CardDefaults.cardElevation(defaultElevation = 8.dp)
+    ) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(start = 12.dp, top = 12.dp, end = 4.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            ReportMarkerThumbnail(report = report)
+
+            Spacer(modifier = Modifier.width(12.dp))
+
+            Column(modifier = Modifier.weight(1f)) {
+                Text(
+                    text = report.petName,
+                    style = MaterialTheme.typography.titleSmall,
+                    fontWeight = FontWeight.Bold,
+                    color = BrandColors.TextPrimary,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis
+                )
+                Spacer(modifier = Modifier.height(4.dp))
+                ReportMarkerStatusBadge(status = report.status)
+            }
+
+            IconButton(onClick = onClose, modifier = Modifier.size(36.dp)) {
+                Icon(
+                    imageVector = Icons.Filled.Close,
+                    contentDescription = "Cerrar",
+                    tint = BrandColors.TextSecondary,
+                    modifier = Modifier.size(18.dp)
+                )
+            }
+        }
+
+        Button(
+            onClick = onViewDetail,
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(start = 12.dp, end = 12.dp, top = 10.dp, bottom = 12.dp),
+            shape = RoundedCornerShape(12.dp),
+            colors = ButtonDefaults.buttonColors(
+                containerColor = BrandColors.Primary,
+                contentColor = Color.White
+            )
+        ) {
+            Text(
+                text = "Ver detalle",
+                style = MaterialTheme.typography.titleSmall,
+                fontWeight = FontWeight.Bold
+            )
+        }
+    }
+}
+
+
+@Composable
+private fun ReportMarkerThumbnail(report: Report) {
+    val imageUrl = report.allImageUrls.firstOrNull()
+
+    Box(
+        modifier = Modifier
+            .size(48.dp)
+            .clip(CircleShape)
+            .background(BrandColors.PrimaryLight),
+        contentAlignment = Alignment.Center
+    ) {
+        // Placeholder de huella: queda detrás de la foto si Coil no puede cargarla.
+        Icon(
+            imageVector = Icons.Filled.Pets,
+            contentDescription = null,
+            tint = BrandColors.Primary,
+            modifier = Modifier.size(24.dp)
+        )
+
+        if (!imageUrl.isNullOrBlank()) {
+            AsyncImage(
+                model = imageUrl,
+                contentDescription = report.petName,
+                contentScale = ContentScale.Crop,
+                modifier = Modifier.fillMaxSize()
+            )
+        }
+    }
+}
+
+
+@Composable
+private fun ReportMarkerStatusBadge(status: String) {
+    val style = markerStatusBadgeStyle(status)
+
+    Box(
+        modifier = Modifier
+            .clip(RoundedCornerShape(50))
+            .background(style.container)
+            .padding(horizontal = 8.dp, vertical = 2.dp)
+    ) {
+        Text(
+            text = style.label,
+            style = MaterialTheme.typography.labelSmall,
+            fontWeight = FontWeight.Bold,
+            letterSpacing = 0.4.sp,
+            color = style.content
+        )
+    }
 }

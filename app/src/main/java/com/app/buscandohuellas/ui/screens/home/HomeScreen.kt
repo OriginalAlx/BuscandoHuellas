@@ -3,16 +3,22 @@ package com.app.buscandohuellas.ui.screens.home
 import android.Manifest
 import android.content.Intent
 import android.content.pm.PackageManager
+import android.content.res.Resources
 import android.graphics.Bitmap
 import android.graphics.Canvas
 import android.graphics.Color
 import android.graphics.Paint
-import android.graphics.drawable.BitmapDrawable
+import android.graphics.Path
 import android.graphics.drawable.Drawable
 import android.net.Uri
 import android.provider.Settings
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.slideInVertically
+import androidx.compose.animation.slideOutVertically
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
@@ -72,6 +78,10 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.core.content.ContextCompat
+import androidx.core.graphics.createBitmap
+import androidx.core.graphics.drawable.toDrawable
+import androidx.core.graphics.toColorInt
+import androidx.core.graphics.withRotation
 import androidx.hilt.lifecycle.viewmodel.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.app.buscandohuellas.domain.model.Report
@@ -189,7 +199,7 @@ fun HomeScreen(
                     hasLocationPermission = hasLocationPermission,
                     userLocation = userLocation,
                     onLocationPermissionRequest = requestLocationPermission,
-                    onMarkerClick = onReportClick
+                    onReportClick = onReportClick
                 )
 
                 HomeTab.ALERTS -> AlertsContent(
@@ -426,9 +436,19 @@ private fun MapContent(
     hasLocationPermission: Boolean,
     userLocation: GeoPoint?,
     onLocationPermissionRequest: () -> Unit,
-    onMarkerClick: (String) -> Unit
+    onReportClick: (String) -> Unit
 ) {
     var mapInstance by remember { mutableStateOf<MapView?>(null) }
+    var selectedReport by remember { mutableStateOf<Report?>(null) }
+    // Conserva el último reporte elegido para que el panel tenga contenido
+    // durante la animación de salida.
+    var panelReport by remember { mutableStateOf<Report?>(null) }
+
+    // Los iconos solo dependen del estado y la densidad: se reutilizan entre
+    // marcadores para no crear un bitmap por cada recomposición.
+    val pawIcons = remember { mutableMapOf<String, Drawable>() }
+    fun pawIcon(status: String): Drawable =
+        pawIcons.getOrPut(status.uppercase()) { getPawPrintDrawable(status) }
 
     LaunchedEffect(userLocation) {
         val location = userLocation ?: return@LaunchedEffect
@@ -472,10 +492,11 @@ private fun MapContent(
                                 position = GeoPoint(report.latitude, report.longitude)
                                 title = report.petName
                                 snippet = "${report.status}\n${report.description}"
-                                icon = getMarkerDrawable(report.status)
+                                icon = pawIcon(report.status)
                                 setAnchor(Marker.ANCHOR_CENTER, Marker.ANCHOR_BOTTOM)
                                 setOnMarkerClickListener { _, _ ->
-                                    onMarkerClick(report.id.orEmpty())
+                                    panelReport = report
+                                    selectedReport = report
                                     true
                                 }
                             }
@@ -544,6 +565,27 @@ private fun MapContent(
                     .padding(end = 24.dp, bottom = 88.dp)
             )
         }
+
+        AnimatedVisibility(
+            visible = selectedReport != null,
+            enter = slideInVertically(initialOffsetY = { height -> height }) + fadeIn(),
+            exit = slideOutVertically(targetOffsetY = { height -> height }) + fadeOut(),
+            modifier = Modifier
+                .align(Alignment.BottomCenter)
+                .padding(horizontal = 16.dp)
+                .padding(bottom = 96.dp)
+        ) {
+            panelReport?.let { report ->
+                ReportMarkerPanel(
+                    report = report,
+                    onClose = { selectedReport = null },
+                    onViewDetail = {
+                        selectedReport = null
+                        onReportClick(report.id.orEmpty())
+                    }
+                )
+            }
+        }
     }
 }
 
@@ -585,37 +627,74 @@ private fun MapActivationPlaceholder(modifier: Modifier = Modifier) {
     }
 }
 
-private fun getMarkerDrawable(status: String): Drawable {
-    val color = when (status.uppercase()) {
-        "LOST" -> Color.RED
-        "FOUND" -> Color.GREEN
-        "SIGHTED" -> Color.BLUE
-        "USER" -> Color.BLUE
-        else -> Color.GRAY
+/**
+ * Dibuja una huella de mascota vectorial con Canvas/Path: una almohadilla
+ * principal y cuatro dedos en arco, con borde blanco de 2dp para que resalte
+ * sobre el mapa.
+ */
+private fun getPawPrintDrawable(status: String): Drawable {
+    val pawColor = when (status.uppercase()) {
+        "LOST" -> "#DC2626".toColorInt()
+        "FOUND" -> "#059669".toColorInt()
+        "SIGHTED" -> "#2563EB".toColorInt()
+        else -> "#6B7280".toColorInt()
     }
 
-    val size = 80
-    val bitmap = Bitmap.createBitmap(size, size, Bitmap.Config.ARGB_8888)
-    val canvas = Canvas(bitmap)
+    val displayMetrics = Resources.getSystem().displayMetrics
+    val density = displayMetrics.density
+    val sizeDp = 60f
+    val sizePx = (sizeDp * density).toInt().coerceAtLeast(1)
 
-    val paint = Paint().apply {
-        this.color = color
+    val bitmap = createBitmap(sizePx, sizePx, Bitmap.Config.ARGB_8888).apply {
+        // La densidad hace que el drawable mida 60dp reales en pantalla.
+        this.density = displayMetrics.densityDpi
+    }
+    val canvas = Canvas(bitmap)
+    canvas.scale(density, density)
+
+    val fillPaint = Paint().apply {
+        color = pawColor
         style = Paint.Style.FILL
         isAntiAlias = true
     }
-
     val borderPaint = Paint().apply {
-        this.color = Color.WHITE
+        color = Color.WHITE
         style = Paint.Style.STROKE
-        strokeWidth = 6f
+        strokeWidth = 4f // 2dp de borde a cada lado de la silueta
+        strokeJoin = Paint.Join.ROUND
         isAntiAlias = true
     }
 
-    val radius = (size / 2f) - 3f
-    canvas.drawCircle(size / 2f, size / 2f, radius, paint)
-    canvas.drawCircle(size / 2f, size / 2f, radius, borderPaint)
+    fun drawToe(cx: Float, cy: Float, rx: Float, ry: Float, rotation: Float) {
+        val left = cx - rx
+        val top = cy - ry
+        val right = cx + rx
+        val bottom = cy + ry
+        canvas.withRotation(rotation, cx, cy) {
+            drawOval(left, top, right, bottom, borderPaint)
+            drawOval(left, top, right, bottom, fillPaint)
+        }
+    }
 
-    return BitmapDrawable(android.content.res.Resources.getSystem(), bitmap)
+    // Cuatro dedos distribuidos en arco sobre la almohadilla.
+    drawToe(cx = 13.5f, cy = 22.5f, rx = 5f, ry = 7f, rotation = -28f)
+    drawToe(cx = 23.5f, cy = 15f, rx = 5.5f, ry = 7.5f, rotation = -9f)
+    drawToe(cx = 36.5f, cy = 15f, rx = 5.5f, ry = 7.5f, rotation = 9f)
+    drawToe(cx = 46.5f, cy = 22.5f, rx = 5f, ry = 7f, rotation = 28f)
+
+    // Almohadilla principal, más ancha arriba y redondeada abajo.
+    val pad = Path().apply {
+        moveTo(30f, 29f)
+        cubicTo(39f, 29f, 46f, 35f, 46f, 42f)
+        cubicTo(46f, 50f, 39f, 55f, 30f, 55f)
+        cubicTo(21f, 55f, 14f, 50f, 14f, 42f)
+        cubicTo(14f, 35f, 21f, 29f, 30f, 29f)
+        close()
+    }
+    canvas.drawPath(pad, borderPaint)
+    canvas.drawPath(pad, fillPaint)
+
+    return bitmap.toDrawable(Resources.getSystem())
 }
 
 @Composable
@@ -865,7 +944,7 @@ private fun MapContentPreview() {
             hasLocationPermission = false,
             userLocation = null,
             onLocationPermissionRequest = {},
-            onMarkerClick = {}
+            onReportClick = {}
         )
     }
 }
