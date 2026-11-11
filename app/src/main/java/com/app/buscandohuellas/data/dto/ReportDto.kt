@@ -2,6 +2,7 @@ package com.app.buscandohuellas.data.dto
 
 import com.app.buscandohuellas.domain.model.Report
 import kotlinx.serialization.SerialName
+import kotlinx.serialization.Serializable
 
 data class ReportDto(
     @SerialName("id") val id: String,
@@ -10,7 +11,9 @@ data class ReportDto(
     @SerialName("description") val description: String?,
     @SerialName("status") val status: String,
     @SerialName("image_url") val image_url: String?,
-    @SerialName("image_urls") val image_urls: List<String>? = null,
+    @SerialName("image_urls")
+    @Serializable(with = StringListSerializer::class)
+    val image_urls: List<String>? = null,
     @SerialName("created_at") val createdAt: String? = null,
     @SerialName("location") val location: String? = null
 ) {

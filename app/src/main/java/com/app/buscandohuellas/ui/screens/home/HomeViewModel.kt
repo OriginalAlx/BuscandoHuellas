@@ -210,6 +210,7 @@ class HomeViewModel @Inject constructor(
     }
 
     private fun Report.toRecentReport(): RecentReport {
+        val images = allImageUrls
         return RecentReport(
             id = id.orEmpty(),
             petName = petName,
@@ -219,7 +220,8 @@ class HomeViewModel @Inject constructor(
                 "SIGHTED" -> PetReportStatus.FOUND
                 else -> PetReportStatus.LOST
             },
-            imageUrl = imageUrl,
+            imageUrl = images.firstOrNull(),
+            imageUrls = images,
             latitude = latitude,
             longitude = longitude
         )

@@ -103,9 +103,19 @@ data class RecentReport(
     val breed: String,
     val status: PetReportStatus,
     val imageUrl: String? = null,
+    val imageUrls: List<String> = emptyList(),
     val latitude: Double? = null,
     val longitude: Double? = null
-)
+) {
+    val allImageUrls: List<String>
+        get() = (listOfNotNull(imageUrl) + imageUrls)
+            .map { it.trim() }
+            .filter { it.isNotBlank() }
+            .distinct()
+
+    val extraPhotosCount: Int
+        get() = (allImageUrls.size - 1).coerceAtLeast(0)
+}
 
 
 data class AlertItemUi(
@@ -486,6 +496,9 @@ fun PetReportCard(
         else -> String.format(Locale.US, "%.4f, %.4f", reportLatitude, reportLongitude)
     }
 
+    val images = report.allImageUrls
+    val coverImage = images.firstOrNull()
+
     Card(
         modifier = modifier
             .fillMaxWidth()
@@ -500,15 +513,35 @@ fun PetReportCard(
                 .padding(12.dp),
             verticalAlignment = Alignment.CenterVertically
         ) {
-            if (!report.imageUrl.isNullOrBlank()) {
-                AsyncImage(
-                    model = report.imageUrl,
-                    contentDescription = "Foto de ${report.petName}",
-                    contentScale = ContentScale.Crop,
-                    modifier = Modifier
-                        .size(64.dp)
-                        .clip(RoundedCornerShape(12.dp))
-                )
+            if (coverImage != null) {
+                Box(modifier = Modifier.size(64.dp)) {
+                    AsyncImage(
+                        model = coverImage,
+                        contentDescription = "Foto de ${report.petName}",
+                        contentScale = ContentScale.Crop,
+                        modifier = Modifier
+                            .fillMaxSize()
+                            .clip(RoundedCornerShape(12.dp))
+                    )
+
+                    if (images.size > 1) {
+                        Box(
+                            modifier = Modifier
+                                .align(Alignment.TopEnd)
+                                .padding(3.dp)
+                                .clip(CircleShape)
+                                .background(Color.Black.copy(alpha = 0.62f))
+                                .padding(horizontal = 6.dp, vertical = 2.dp)
+                        ) {
+                            Text(
+                                text = "+${images.size - 1}",
+                                color = Color.White,
+                                style = MaterialTheme.typography.labelSmall,
+                                fontWeight = FontWeight.Bold
+                            )
+                        }
+                    }
+                }
             } else {
                 PetPhotoPlaceholder(size = 64.dp)
             }

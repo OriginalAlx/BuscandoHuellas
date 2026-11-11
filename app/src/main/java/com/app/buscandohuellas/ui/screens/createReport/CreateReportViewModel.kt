@@ -14,7 +14,6 @@ import com.google.android.gms.location.FusedLocationProviderClient
 import com.google.android.gms.location.LocationServices
 import dagger.hilt.android.lifecycle.HiltViewModel
 import dagger.hilt.android.qualifiers.ApplicationContext
-import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -27,7 +26,7 @@ import javax.inject.Inject
 sealed interface CreateReportUiState {
     data object Idle : CreateReportUiState
     data object Loading : CreateReportUiState
-    data object Success : CreateReportUiState
+    data class Success(val warning: String? = null) : CreateReportUiState
     data class Error(val message: String) : CreateReportUiState
 }
 
@@ -60,14 +59,11 @@ class CreateReportViewModel @Inject constructor(
     val isLocationLoading: StateFlow<Boolean> = _isLocationLoading.asStateFlow()
 
     
-    private val _selectedImageUri = MutableStateFlow<Uri?>(null)
-    val selectedImageUri: StateFlow<Uri?> = _selectedImageUri.asStateFlow()
+    private val _selectedImageUris = MutableStateFlow<List<Uri>>(emptyList())
+    val selectedImageUris: StateFlow<List<Uri>> = _selectedImageUris.asStateFlow()
 
     private val _isUploadingImage = MutableStateFlow(false)
     val isUploadingImage: StateFlow<Boolean> = _isUploadingImage.asStateFlow()
-
-    private val _uploadedImageUrl = MutableStateFlow<String?>(null)
-    val uploadedImageUrl: StateFlow<String?> = _uploadedImageUrl.asStateFlow()
 
     
     private val _isMapPickerOpen = MutableStateFlow(false)
@@ -146,20 +142,43 @@ class CreateReportViewModel @Inject constructor(
     }
 
     
-    fun selectImageFromGallery() {
-        
+    fun addPhotos(uris: List<Uri>) {
+        if (uris.isEmpty()) return
+        clearError()
+
+        val current = _selectedImageUris.value
+        val remaining = MAX_PHOTOS - current.size
+        if (remaining <= 0) {
+            _uiState.value = CreateReportUiState.Error("Máximo 5 fotos alcanzado.")
+            return
+        }
+
+        val newUris = uris.filter { it !in current }.distinct()
+        val accepted = newUris.take(remaining)
+        if (accepted.size < newUris.size) {
+            _uiState.value = CreateReportUiState.Error(
+                "Solo puedes agregar hasta $MAX_PHOTOS fotos. Se añadieron ${accepted.size}."
+            )
+        }
+        _selectedImageUris.value = current + accepted
+    }
+
+    fun removePhoto(uri: Uri) {
+        _selectedImageUris.value = _selectedImageUris.value.filterNot { it == uri }
         clearError()
     }
 
-    
-    fun onImageSelected(uri: Uri) {
-        _selectedImageUri.value = uri
-        _uploadedImageUrl.value = null
-        uploadImageToStorage(uri)
+    fun clearPhotos() {
+        _selectedImageUris.value = emptyList()
+        clearError()
     }
 
-    
     fun onImageCaptured(bitmap: Bitmap) {
+        if (_selectedImageUris.value.size >= MAX_PHOTOS) {
+            _uiState.value = CreateReportUiState.Error("Máximo 5 fotos alcanzado.")
+            return
+        }
+
         viewModelScope.launch {
             try {
                 val file = File(context.cacheDir, "camera_${System.currentTimeMillis()}.jpg")
@@ -171,98 +190,10 @@ class CreateReportViewModel @Inject constructor(
                     "${context.packageName}.fileprovider",
                     file
                 )
-                onImageSelected(uri)
+                addPhotos(listOf(uri))
             } catch (error: Exception) {
                 Log.e(TAG, "Error al guardar imagen de cámara", error)
                 _uiState.value = CreateReportUiState.Error("No se pudo guardar la foto.")
-            }
-        }
-    }
-
-    
-    fun uploadImageToStorage(uri: Uri) {
-        viewModelScope.launch {
-            _isUploadingImage.value = true
-            clearError()
-
-            try {
-                val contentResolver = context.contentResolver
-                val inputStream = contentResolver.openInputStream(uri)
-                    ?: throw IllegalStateException("No se pudo leer la imagen seleccionada")
-
-                val bytes = inputStream.use { it.readBytes() }
-
-                
-                val maxSizeBytes = 5 * 1024 * 1024
-                if (bytes.size > maxSizeBytes) {
-                    _isUploadingImage.value = false
-                    _selectedImageUri.value = null
-                    _uiState.value = CreateReportUiState.Error(
-                        "La imagen supera el tamaño máximo de 5MB."
-                    )
-                    return@launch
-                }
-
-                
-                val mimeType = contentResolver.getType(uri)
-                val extension = when (mimeType) {
-                    "image/png" -> "png"
-                    "image/webp" -> "webp"
-                    "image/gif" -> "gif"
-                    "image/bmp" -> "bmp"
-                    "image/jpeg", "image/jpg" -> "jpg"
-                    else -> {
-                        
-                        val path = uri.lastPathSegment.orEmpty()
-                        if (path.contains(".")) {
-                            path.substringAfterLast(".").lowercase().ifBlank { "jpg" }
-                        } else {
-                            "jpg"
-                        }
-                    }
-                }
-
-                reportRepository.uploadReportImage(bytes, extension)
-                    .onSuccess { publicUrl ->
-                        _uploadedImageUrl.value = publicUrl
-                        
-                        _selectedImageUri.value = Uri.parse(publicUrl)
-                        _isUploadingImage.value = false
-                    }
-                    .onFailure { error ->
-                        _isUploadingImage.value = false
-                        _selectedImageUri.value = null
-                        _uiState.value = CreateReportUiState.Error(
-                            error.message ?: "No se pudo subir la imagen."
-                        )
-                    }
-            } catch (error: CancellationException) {
-                throw error
-            } catch (error: Exception) {
-                Log.e(TAG, "Error al leer/subir imagen", error)
-                _isUploadingImage.value = false
-                _selectedImageUri.value = null
-                _uiState.value = CreateReportUiState.Error(
-                    "No se pudo procesar la imagen."
-                )
-            }
-        }
-    }
-
-    
-    fun clearImage() {
-        val urlToDelete = _uploadedImageUrl.value
-        _selectedImageUri.value = null
-        _uploadedImageUrl.value = null
-        _isUploadingImage.value = false
-        if (uiState.value is CreateReportUiState.Error) {
-            clearError()
-        }
-
-        
-        if (urlToDelete != null) {
-            viewModelScope.launch {
-                reportRepository.deleteReportImage(urlToDelete)
             }
         }
     }
@@ -271,6 +202,7 @@ class CreateReportViewModel @Inject constructor(
         val petName = _petName.value.trim()
         val latitude = _latitude.value
         val longitude = _longitude.value
+        val photos = _selectedImageUris.value
 
         if (petName.isEmpty()) {
             _uiState.value = CreateReportUiState.Error("Ingresa el nombre de la mascota.")
@@ -285,33 +217,67 @@ class CreateReportViewModel @Inject constructor(
 
         
         if (_isUploadingImage.value) {
-            _uiState.value = CreateReportUiState.Error("Espera a que la imagen termine de subir.")
+            _uiState.value = CreateReportUiState.Error("Espera a que las fotos terminen de subir.")
             return
         }
 
         viewModelScope.launch {
             _uiState.value = CreateReportUiState.Loading
+            _isUploadingImage.value = true
 
-            
-            val report = Report(
-                userId = "",
-                petName = petName,
-                description = _description.value.trim(),
-                status = "LOST",
-                imageUrl = _uploadedImageUrl.value,
-                latitude = latitude,
-                longitude = longitude
-            )
+            var uploadedUrls: List<String> = emptyList()
+            try {
+                val uploadResult = reportRepository.uploadReportImages(photos)
+                    .getOrElse { error ->
+                        _uiState.value = CreateReportUiState.Error(
+                            error.message ?: "No se pudieron subir las fotos. Inténtalo de nuevo."
+                        )
+                        return@launch
+                    }
 
-            reportRepository.createReport(report)
-                .onSuccess {
-                    _uiState.value = CreateReportUiState.Success
-                }
-                .onFailure { error ->
-                    _uiState.value = CreateReportUiState.Error(
-                        error.message ?: "No se pudo publicar el reporte. Inténtalo de nuevo."
-                    )
-                }
+                uploadedUrls = uploadResult.urls
+
+                val report = Report(
+                    userId = "",
+                    petName = petName,
+                    description = _description.value.trim(),
+                    status = "LOST",
+                    imageUrl = uploadedUrls.firstOrNull(),
+                    imageUrls = uploadedUrls.takeIf { it.isNotEmpty() },
+                    latitude = latitude,
+                    longitude = longitude
+                )
+
+                reportRepository.createReport(report)
+                    .onSuccess {
+                        val warning = if (uploadResult.hasFailures) {
+                            "El reporte se publicó, pero ${uploadResult.failedCount} " +
+                                if (uploadResult.failedCount == 1) {
+                                    "foto no se pudo subir."
+                                } else {
+                                    "fotos no se pudieron subir."
+                                }
+                        } else {
+                            null
+                        }
+                        _uiState.value = CreateReportUiState.Success(warning)
+                    }
+                    .onFailure { error ->
+                        deleteUploadedPhotos(uploadedUrls)
+                        _uiState.value = CreateReportUiState.Error(
+                            error.message ?: "No se pudo publicar el reporte. Inténtalo de nuevo."
+                        )
+                    }
+            } finally {
+                _isUploadingImage.value = false
+            }
+        }
+    }
+
+    private suspend fun deleteUploadedPhotos(urls: List<String>) {
+        urls.forEach { url ->
+            runCatching { reportRepository.deleteReportImage(url) }
+                .onFailure { Log.w(TAG, "No se pudo limpiar la foto huérfana: $url", it) }
         }
     }
 
@@ -322,6 +288,7 @@ class CreateReportViewModel @Inject constructor(
     }
 
     companion object {
+        const val MAX_PHOTOS = 5
         private const val TAG = "CreateReportViewModel"
     }
 }

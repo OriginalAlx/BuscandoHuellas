@@ -3,12 +3,15 @@ package com.app.buscandohuellas.ui.screens.createReport
 import android.Manifest
 import android.content.pm.PackageManager
 import android.graphics.Bitmap
+import android.widget.Toast
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
@@ -17,23 +20,23 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.lazy.LazyRow
+import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.CameraAlt
 import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.Close
-import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Map
 import androidx.compose.material.icons.filled.MyLocation
 import androidx.compose.material.icons.filled.PhotoLibrary
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.CircularProgressIndicator
-import androidx.compose.material3.DropdownMenu
-import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -49,7 +52,6 @@ import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import kotlinx.coroutines.launch
 import androidx.compose.ui.Alignment
@@ -84,7 +86,7 @@ fun CreateReportScreen(
     val latitude by viewModel.latitude.collectAsStateWithLifecycle()
     val longitude by viewModel.longitude.collectAsStateWithLifecycle()
     val isLocationLoading by viewModel.isLocationLoading.collectAsStateWithLifecycle()
-    val selectedImageUri by viewModel.selectedImageUri.collectAsStateWithLifecycle()
+    val selectedImageUris by viewModel.selectedImageUris.collectAsStateWithLifecycle()
     val isUploadingImage by viewModel.isUploadingImage.collectAsStateWithLifecycle()
     val isMapPickerOpen by viewModel.isMapPickerOpen.collectAsStateWithLifecycle()
 
@@ -104,10 +106,10 @@ fun CreateReportScreen(
 
     
     val galleryLauncher = rememberLauncherForActivityResult(
-        contract = ActivityResultContracts.GetContent()
-    ) { uri ->
-        if (uri != null) {
-            viewModel.onImageSelected(uri)
+        contract = ActivityResultContracts.GetMultipleContents()
+    ) { uris ->
+        if (uris.isNotEmpty()) {
+            viewModel.addPhotos(uris)
         }
     }
 
@@ -133,7 +135,11 @@ fun CreateReportScreen(
 
     
     LaunchedEffect(uiState) {
-        if (uiState is CreateReportUiState.Success) {
+        val success = uiState as? CreateReportUiState.Success
+        if (success != null) {
+            success.warning?.let { message ->
+                Toast.makeText(context, message, Toast.LENGTH_LONG).show()
+            }
             onReportCreated()
         }
     }
@@ -222,7 +228,8 @@ fun CreateReportScreen(
 
             
             PhotoSection(
-                imageUri = selectedImageUri,
+                photos = selectedImageUris,
+                maxPhotos = CreateReportViewModel.MAX_PHOTOS,
                 isUploading = isUploadingImage,
                 enabled = uiState !is CreateReportUiState.Loading,
                 onTakePhoto = {
@@ -237,10 +244,9 @@ fun CreateReportScreen(
                     }
                 },
                 onPickFromGallery = {
-                    viewModel.selectImageFromGallery()
                     galleryLauncher.launch("image/*")
                 },
-                onRemovePhoto = { viewModel.clearImage() }
+                onRemovePhoto = { uri -> viewModel.removePhoto(uri) }
             )
 
             Button(
@@ -385,22 +391,34 @@ private fun LocationSection(
 
 @Composable
 private fun PhotoSection(
-    imageUri: android.net.Uri?,
+    photos: List<android.net.Uri>,
+    maxPhotos: Int,
     isUploading: Boolean,
     enabled: Boolean,
     onTakePhoto: () -> Unit,
     onPickFromGallery: () -> Unit,
-    onRemovePhoto: () -> Unit
+    onRemovePhoto: (android.net.Uri) -> Unit
 ) {
-    var menuExpanded = remember { mutableStateOf(false) }
+    val canAddMore = photos.size < maxPhotos
 
     Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-        Text(
-            text = "Foto de la mascota (opcional)",
-            style = MaterialTheme.typography.titleSmall
-        )
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Text(
+                text = "Fotos de la mascota (opcional)",
+                style = MaterialTheme.typography.titleSmall
+            )
+            Text(
+                text = "${photos.size}/$maxPhotos fotos",
+                style = MaterialTheme.typography.labelMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+        }
 
-        if (imageUri == null) {
+        if (photos.isEmpty()) {
             
             Card(
                 modifier = Modifier.fillMaxWidth(),
@@ -421,118 +439,163 @@ private fun PhotoSection(
                         verticalArrangement = Arrangement.spacedBy(12.dp)
                     ) {
                         Icon(
-                            imageVector = Icons.Filled.CameraAlt,
+                            imageVector = Icons.Filled.PhotoLibrary,
                             contentDescription = null,
                             tint = MaterialTheme.colorScheme.onSurfaceVariant,
                             modifier = Modifier.size(36.dp)
                         )
-                        Text(
-                            text = "Añadir foto",
-                            style = MaterialTheme.typography.bodyMedium,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant
-                        )
-                        Box {
-                            OutlinedButton(
-                                onClick = { menuExpanded.value = true },
-                                enabled = enabled && !isUploading
-                            ) {
-                                Text("Tomar foto o seleccionar")
-                            }
-                            DropdownMenu(
-expanded = menuExpanded.value,
-                                onDismissRequest = { menuExpanded.value = false }
-                            ) {
-                                DropdownMenuItem(
-                                    text = { Text("Tomar foto") },
-                                    leadingIcon = {
-                                        Icon(Icons.Filled.CameraAlt, contentDescription = null)
-                                    },
-                                    onClick = {
-                                        menuExpanded.value = false
-                                        onTakePhoto()
-                                    }
-                                )
-                                DropdownMenuItem(
-                                    text = { Text("Seleccionar de galería") },
-                                    leadingIcon = {
-                                        Icon(Icons.Filled.PhotoLibrary, contentDescription = null)
-                                    },
-                                    onClick = {
-                                        menuExpanded.value = false
-                                        onPickFromGallery()
-                                    }
-                                )
-                            }
+                        Button(
+                            onClick = onPickFromGallery,
+                            enabled = enabled && !isUploading
+                        ) {
+                            Icon(Icons.Filled.Add, contentDescription = null)
+                            Spacer(modifier = Modifier.width(8.dp))
+                            Text("Agregar fotos")
+                        }
+                        OutlinedButton(
+                            onClick = onTakePhoto,
+                            enabled = enabled && !isUploading
+                        ) {
+                            Icon(Icons.Filled.CameraAlt, contentDescription = null)
+                            Spacer(modifier = Modifier.width(8.dp))
+                            Text("Tomar foto")
                         }
                     }
                 }
             }
         } else {
             
-            Box(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .height(220.dp)
-                    .clip(RoundedCornerShape(12.dp))
+            LazyRow(
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                contentPadding = PaddingValues(vertical = 4.dp)
             ) {
-                AsyncImage(
-                    model = ImageRequest.Builder(LocalContext.current)
-                        .data(imageUri)
-                        .crossfade(true)
-                        .build(),
-                    contentDescription = "Foto de la mascota",
-                    contentScale = ContentScale.Crop,
-                    modifier = Modifier.fillMaxSize()
-                )
+                items(photos, key = { it.toString() }) { uri ->
+                    PhotoThumbnail(
+                        uri = uri,
+                        enabled = enabled && !isUploading,
+                        onRemove = { onRemovePhoto(uri) }
+                    )
+                }
 
-                
-                if (enabled) {
-                    IconButton(
-                        onClick = onRemovePhoto,
-                        enabled = !isUploading,
-                        modifier = Modifier
-                            .align(Alignment.TopEnd)
-                            .padding(8.dp)
-                            .background(
-                                color = MaterialTheme.colorScheme.surface.copy(alpha = 0.9f),
-                                shape = CircleShape
-                            )
-                    ) {
-                        Icon(
-                            imageVector = Icons.Filled.Delete,
-                            contentDescription = "Eliminar foto",
-                            tint = MaterialTheme.colorScheme.error
+                if (canAddMore) {
+                    item {
+                        AddPhotoTile(
+                            enabled = enabled && !isUploading,
+                            onClick = onPickFromGallery
                         )
                     }
                 }
+            }
 
-                
-                if (isUploading) {
-                    Box(
-                        modifier = Modifier
-                            .fillMaxSize()
-                            .background(Color.Black.copy(alpha = 0.4f)),
-                        contentAlignment = Alignment.Center
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                if (canAddMore) {
+                    OutlinedButton(
+                        onClick = onTakePhoto,
+                        enabled = enabled && !isUploading,
+                        modifier = Modifier.weight(1f)
                     ) {
-                        Column(
-                            horizontalAlignment = Alignment.CenterHorizontally,
-                            verticalArrangement = Arrangement.spacedBy(8.dp)
-                        ) {
-                            CircularProgressIndicator(color = Color.White)
-                            Text(
-                                text = "Subiendo imagen...",
-                                style = MaterialTheme.typography.bodyMedium,
-                                color = Color.White
-                            )
-                        }
+                        Icon(Icons.Filled.CameraAlt, contentDescription = null)
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Text("Tomar foto")
                     }
+                }
+                if (photos.size >= maxPhotos) {
+                    Text(
+                        text = "Máximo $maxPhotos fotos alcanzado",
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.error
+                    )
                 }
             }
         }
 
-        
         if (isUploading) {
             LinearProgressIndicator(modifier = Modifier.fillMaxWidth())
+            Text(
+                text = "Subiendo fotos...",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+        }
+    }
+}
+
+@Composable
+private fun PhotoThumbnail(
+    uri: android.net.Uri,
+    enabled: Boolean,
+    onRemove: () -> Unit
+) {
+    Box(modifier = Modifier.size(104.dp)) {
+        AsyncImage(
+            model = ImageRequest.Builder(LocalContext.current)
+                .data(uri)
+                .crossfade(true)
+                .build(),
+            contentDescription = "Foto seleccionada",
+            contentScale = ContentScale.Crop,
+            modifier = Modifier
+                .fillMaxSize()
+                .clip(RoundedCornerShape(12.dp))
+        )
+
+        if (enabled) {
+            IconButton(
+                onClick = onRemove,
+                modifier = Modifier
+                    .align(Alignment.TopEnd)
+                    .padding(4.dp)
+                    .size(28.dp)
+                    .background(
+                        color = MaterialTheme.colorScheme.surface.copy(alpha = 0.9f),
+                        shape = CircleShape
+                    )
+            ) {
+                Icon(
+                    imageVector = Icons.Filled.Close,
+                    contentDescription = "Eliminar foto",
+                    tint = MaterialTheme.colorScheme.error,
+                    modifier = Modifier.size(18.dp)
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun AddPhotoTile(
+    enabled: Boolean,
+    onClick: () -> Unit
+) {
+    Box(
+        modifier = Modifier
+            .size(104.dp)
+            .clip(RoundedCornerShape(12.dp))
+            .dashedBorder(
+                color = MaterialTheme.colorScheme.outlineVariant,
+                cornerRadius = 12.dp
+            )
+            .clickable(enabled = enabled, onClick = onClick),
+        contentAlignment = Alignment.Center
+    ) {
+        Column(
+            horizontalAlignment = Alignment.CenterHorizontally,
+            verticalArrangement = Arrangement.spacedBy(4.dp)
+        ) {
+            Icon(
+                imageVector = Icons.Filled.Add,
+                contentDescription = null,
+                tint = MaterialTheme.colorScheme.primary
+            )
+            Text(
+                text = "Agregar",
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.primary
+            )
         }
     }
 }
