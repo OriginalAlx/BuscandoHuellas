@@ -27,6 +27,7 @@ data class ReportDto(
                 ?.map { it.trim() }
                 ?.filter { it.isNotBlank() }
                 ?.takeIf { it.isNotEmpty() },
+            createdAt = createdAt,
             location = location,
             latitude = lat,
             longitude = lon

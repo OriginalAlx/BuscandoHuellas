@@ -15,6 +15,11 @@ import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.put
+import java.time.Instant
+import java.time.LocalDateTime
+import java.time.OffsetDateTime
+import java.time.ZoneOffset
+import java.time.format.DateTimeParseException
 import java.util.UUID
 import javax.inject.Inject
 
@@ -136,8 +141,14 @@ class ReportRepositoryImpl @Inject constructor(
             report
         }
 
-        Log.d(TAG, "🔍 PASO 5: Reportes finales: ${reports.size}")
-        Result.success(reports)
+        // Ordeno en el repositorio para que mapa e Inicio reciban la misma lista descendente por fecha.
+        val sortedReports = reports
+            .map { report -> report to (parseCreatedAt(report.createdAt) ?: Instant.MIN) }
+            .sortedByDescending { it.second }
+            .map { it.first }
+
+        Log.d(TAG, "🔍 PASO 5: Reportes finales: ${sortedReports.size}")
+        Result.success(sortedReports)
 
     } catch (error: Exception) {
         Log.e(TAG, "ERROR en getAllReports: ${error.message}", error)
@@ -195,10 +206,27 @@ class ReportRepositoryImpl @Inject constructor(
                 ?.map { it.trim() }
                 ?.filter { it.isNotBlank() }
                 ?.takeIf { it.isNotEmpty() },
+            createdAt = createdAt,
             location = location,
             latitude = point?.second,
             longitude = point?.first
         )
+    }
+
+    private fun parseCreatedAt(createdAt: String?): Instant? {
+        if (createdAt.isNullOrBlank()) return null
+
+        val value = createdAt.trim()
+        return try {
+            OffsetDateTime.parse(value).toInstant()
+        } catch (error: DateTimeParseException) {
+            try {
+                LocalDateTime.parse(value).toInstant(ZoneOffset.UTC)
+            } catch (fallbackError: DateTimeParseException) {
+                Log.w(TAG, "Fecha de creación inválida: $createdAt", fallbackError)
+                null
+            }
+        }
     }
 
     private fun parsePoint(pointString: String): Pair<Double, Double>? {

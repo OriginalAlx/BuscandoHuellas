@@ -9,6 +9,7 @@ data class Report(
     val status: String = "LOST",
     val imageUrl: String? = null,
     val imageUrls: List<String>? = null,
+    val createdAt: String? = null,
     val location: String? = null,
     val latitude: Double? = null,
     val longitude: Double? = null
