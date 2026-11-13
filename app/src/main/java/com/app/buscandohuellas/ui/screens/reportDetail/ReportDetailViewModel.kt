@@ -8,6 +8,7 @@ import androidx.lifecycle.SavedStateHandle
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.app.buscandohuellas.domain.model.Report
+import com.app.buscandohuellas.domain.model.ReportStatus
 import com.app.buscandohuellas.domain.repository.AuthRepository
 import com.app.buscandohuellas.domain.repository.ReportRepository
 import com.app.buscandohuellas.ui.utils.LocationUtils
@@ -46,6 +47,15 @@ class ReportDetailViewModel @Inject constructor(
 
     private val _sightingInput = MutableStateFlow("")
     val sightingInput: StateFlow<String> = _sightingInput.asStateFlow()
+
+    private val _isStatusChanging = MutableStateFlow(false)
+    val isStatusChanging: StateFlow<Boolean> = _isStatusChanging.asStateFlow()
+
+    private val _showStatusSelector = MutableStateFlow(false)
+    val showStatusSelector: StateFlow<Boolean> = _showStatusSelector.asStateFlow()
+
+    private val _snackbarMessage = MutableStateFlow<String?>(null)
+    val snackbarMessage: StateFlow<String?> = _snackbarMessage.asStateFlow()
 
     private var loadedReport: Report? = null
     private var userLocation: GeoPoint? = null
@@ -87,6 +97,82 @@ class ReportDetailViewModel @Inject constructor(
     }
 
     fun retry() = loadReport()
+
+    /**
+     * Recarga el reporte sin mostrar el estado de carga. Se usa al volver de la
+     * pantalla de edición para reflejar los cambios sin parpadear la UI.
+     */
+    fun refresh() {
+        if (reportId.isBlank()) return
+
+        viewModelScope.launch {
+            reportRepository.getReportById(reportId)
+                .onSuccess { report ->
+                    loadedReport = report
+                    isOwner = supabaseClient.auth.currentUserOrNull()?.id == report.userId
+                    resolveReporter(report)
+                    publishSuccess(report)
+                }
+                .onFailure { error ->
+                    Log.e(TAG, "Error al refrescar el reporte $reportId", error)
+                    _snackbarMessage.value = error.message
+                        ?: "No se pudo actualizar la información del reporte."
+                }
+        }
+    }
+
+    fun openStatusSelector() {
+        if (loadedReport != null) _showStatusSelector.value = true
+    }
+
+    fun dismissStatusSelector() {
+        _showStatusSelector.value = false
+    }
+
+    fun onSnackbarShown() {
+        _snackbarMessage.value = null
+    }
+
+    /**
+     * Actualiza el estado del reporte de forma optimista. Si el UPDATE falla,
+     * se restaura el estado anterior y se informa por snackbar.
+     */
+    fun changeReportStatus(newStatus: ReportStatus) {
+        val currentReport = loadedReport ?: return
+        if (_isStatusChanging.value) return
+
+        _showStatusSelector.value = false
+
+        if (newStatus == currentReport.status) return
+
+        val previousStatus = currentReport.status
+        _isStatusChanging.value = true
+
+        val optimisticReport = currentReport.copy(status = newStatus)
+        loadedReport = optimisticReport
+        publishSuccess(optimisticReport)
+
+        viewModelScope.launch {
+            reportRepository.updateReportStatus(reportId, newStatus)
+                .onSuccess {
+                    _snackbarMessage.value = "Estado actualizado a ${newStatus.label}"
+                }
+                .onFailure { error ->
+                    Log.e(
+                        TAG,
+                        "No se pudo actualizar el estado del reporte $reportId",
+                        error
+                    )
+                    val rolledBackReport = currentReport.copy(status = previousStatus)
+                    loadedReport = rolledBackReport
+                    publishSuccess(rolledBackReport)
+                    _snackbarMessage.value = error.message
+                        ?: "No se pudo actualizar el estado. Inténtalo de nuevo."
+                }
+
+            _isStatusChanging.value = false
+        }
+    }
 
     private suspend fun resolveReporter(report: Report) {
         val currentUser = runCatching { authRepository.getCurrentUser() }.getOrNull()

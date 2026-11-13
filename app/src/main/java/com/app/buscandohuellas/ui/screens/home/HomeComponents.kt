@@ -60,6 +60,8 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import coil.compose.AsyncImage
 import com.app.buscandohuellas.domain.model.Report
+import com.app.buscandohuellas.domain.model.ReportStatus
+import com.app.buscandohuellas.ui.components.StatusBadge
 import com.app.buscandohuellas.ui.theme.BrandColors
 import com.app.buscandohuellas.ui.utils.LocationUtils
 import org.osmdroid.util.GeoPoint
@@ -77,12 +79,6 @@ enum class HomeTab(val label: String) {
 enum class AlertFilter(val label: String) {
     ALL("Todas"),
     UNREAD("Sin leer")
-}
-
-
-enum class PetReportStatus {
-    LOST,
-    FOUND
 }
 
 
@@ -107,7 +103,7 @@ data class RecentReport(
     val id: String,
     val petName: String,
     val breed: String,
-    val status: PetReportStatus,
+    val status: ReportStatus,
     val imageUrl: String? = null,
     val imageUrls: List<String> = emptyList(),
     val latitude: Double? = null,
@@ -185,7 +181,7 @@ fun dummyHomeUiState(): HomeUiState = HomeUiState(
             id = "1",
             petName = "Luna",
             breed = "Beagle",
-            status = PetReportStatus.LOST,
+            status = ReportStatus.LOST,
             latitude = -25.7560,
             longitude = -57.2550
         ),
@@ -193,7 +189,7 @@ fun dummyHomeUiState(): HomeUiState = HomeUiState(
             id = "2",
             petName = "Nala",
             breed = "Gatita",
-            status = PetReportStatus.FOUND,
+            status = ReportStatus.FOUND,
             latitude = -25.7640,
             longitude = -57.2610
         ),
@@ -201,7 +197,7 @@ fun dummyHomeUiState(): HomeUiState = HomeUiState(
             id = "3",
             petName = "Milo",
             breed = "Mestizo",
-            status = PetReportStatus.LOST,
+            status = ReportStatus.LOST,
             latitude = -25.7710,
             longitude = -57.2660
         )
@@ -450,33 +446,6 @@ fun PetPhotoPlaceholder(size: Dp = 56.dp, modifier: Modifier = Modifier) {
 
 
 @Composable
-fun ReportStatusChip(status: PetReportStatus, modifier: Modifier = Modifier) {
-    val isLost = status == PetReportStatus.LOST
-    val contentColor = if (isLost) BrandColors.Accent else BrandColors.Success
-    val containerColor = if (isLost) {
-        BrandColors.Accent.copy(alpha = 0.14f)
-    } else {
-        BrandColors.Success.copy(alpha = 0.14f)
-    }
-
-    Box(
-        modifier = modifier
-            .clip(RoundedCornerShape(50))
-            .background(containerColor)
-            .padding(horizontal = 12.dp, vertical = 5.dp)
-    ) {
-        Text(
-            text = if (isLost) "PERDIDA" else "ENCONTRADA",
-            style = MaterialTheme.typography.labelSmall,
-            fontWeight = FontWeight.Bold,
-            letterSpacing = 0.6.sp,
-            color = contentColor
-        )
-    }
-}
-
-
-@Composable
 fun PetReportCard(
     report: RecentReport,
     userLocation: GeoPoint? = null,
@@ -589,7 +558,7 @@ fun PetReportCard(
                 horizontalAlignment = Alignment.CenterHorizontally,
                 verticalArrangement = Arrangement.Center
             ) {
-                ReportStatusChip(status = report.status)
+                StatusBadge(status = report.status)
                 Spacer(modifier = Modifier.height(12.dp))
                 Icon(
                     imageVector = Icons.AutoMirrored.Filled.KeyboardArrowRight,
@@ -1009,35 +978,6 @@ fun StatsDivider(modifier: Modifier = Modifier) {
 }
 
 
-private data class MarkerStatusBadgeStyle(
-    val label: String,
-    val container: Color,
-    val content: Color
-)
-
-
-private fun markerStatusBadgeStyle(status: String): MarkerStatusBadgeStyle =
-    when (status.uppercase()) {
-        "FOUND" -> MarkerStatusBadgeStyle(
-            label = "ENCONTRADA",
-            container = BrandColors.SuccessLight,
-            content = BrandColors.Success
-        )
-
-        "SIGHTED" -> MarkerStatusBadgeStyle(
-            label = "AVISTADA",
-            container = BrandColors.InfoLight,
-            content = BrandColors.Info
-        )
-
-        else -> MarkerStatusBadgeStyle(
-            label = "PERDIDA",
-            container = BrandColors.AccentLight,
-            content = BrandColors.Accent
-        )
-    }
-
-
 /**
  * Panel flotante que aparece sobre el mapa al tocar un marcador de huella.
  */
@@ -1074,7 +1014,7 @@ fun ReportMarkerPanel(
                     overflow = TextOverflow.Ellipsis
                 )
                 Spacer(modifier = Modifier.height(4.dp))
-                ReportMarkerStatusBadge(status = report.status)
+                StatusBadge(status = report.status)
             }
 
             IconButton(onClick = onClose, modifier = Modifier.size(36.dp)) {
@@ -1135,26 +1075,5 @@ private fun ReportMarkerThumbnail(report: Report) {
                 modifier = Modifier.fillMaxSize()
             )
         }
-    }
-}
-
-
-@Composable
-private fun ReportMarkerStatusBadge(status: String) {
-    val style = markerStatusBadgeStyle(status)
-
-    Box(
-        modifier = Modifier
-            .clip(RoundedCornerShape(50))
-            .background(style.container)
-            .padding(horizontal = 8.dp, vertical = 2.dp)
-    ) {
-        Text(
-            text = style.label,
-            style = MaterialTheme.typography.labelSmall,
-            fontWeight = FontWeight.Bold,
-            letterSpacing = 0.4.sp,
-            color = style.content
-        )
     }
 }

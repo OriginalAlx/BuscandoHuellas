@@ -18,10 +18,12 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.navigation.NavHostController
 import androidx.navigation.NavType
 import androidx.navigation.compose.NavHost
@@ -29,12 +31,15 @@ import androidx.navigation.compose.composable
 import androidx.navigation.compose.rememberNavController
 import androidx.navigation.navArgument
 import com.app.buscandohuellas.ui.screens.createReport.CreateReportScreen
+import com.app.buscandohuellas.ui.screens.editReport.EditReportScreen
 import com.app.buscandohuellas.ui.screens.home.HomeScreen
 import com.app.buscandohuellas.ui.screens.login.LoginScreen
 import com.app.buscandohuellas.ui.screens.register.RegisterScreen
 import com.app.buscandohuellas.ui.screens.reportDetail.ReportDetailScreen
 import com.app.buscandohuellas.ui.theme.BuscandoHuellasTheme
 import dagger.hilt.android.AndroidEntryPoint
+
+private const val REPORT_UPDATED_KEY = "report_updated"
 
 
 @AndroidEntryPoint
@@ -141,9 +146,40 @@ fun AppNavHost(navController: NavHostController = rememberNavController()) {
             arguments = listOf(
                 navArgument("reportId") { type = NavType.StringType }
             )
-        ) {
+        ) { backStackEntry ->
+            val reportId = backStackEntry.arguments?.getString("reportId").orEmpty()
+            val reportUpdated by backStackEntry.savedStateHandle
+                .getStateFlow(REPORT_UPDATED_KEY, 0)
+                .collectAsStateWithLifecycle()
+
             ReportDetailScreen(
-                onNavigateBack = { navController.popBackStack() }
+                onNavigateBack = { navController.popBackStack() },
+                onEditClick = {
+                    if (reportId.isNotBlank()) {
+                        navController.navigate("edit_report/$reportId")
+                    }
+                },
+                refreshSignal = reportUpdated
+            )
+        }
+
+        composable(
+            route = "edit_report/{reportId}",
+            arguments = listOf(
+                navArgument("reportId") { type = NavType.StringType }
+            )
+        ) {
+            EditReportScreen(
+                onNavigateBack = { navController.popBackStack() },
+                onReportUpdated = {
+                    navController.previousBackStackEntry
+                        ?.savedStateHandle
+                        ?.let { handle ->
+                            val current = handle.get<Int>(REPORT_UPDATED_KEY) ?: 0
+                            handle[REPORT_UPDATED_KEY] = current + 1
+                        }
+                    navController.popBackStack()
+                }
             )
         }
 

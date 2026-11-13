@@ -6,6 +6,7 @@ import android.util.Log
 import com.app.buscandohuellas.data.dto.ReportDto
 import com.app.buscandohuellas.domain.model.Report
 import com.app.buscandohuellas.domain.model.ReportImageUploadResult
+import com.app.buscandohuellas.domain.model.ReportStatus
 import com.app.buscandohuellas.domain.repository.ReportRepository
 import dagger.hilt.android.qualifiers.ApplicationContext
 import io.github.jan.supabase.SupabaseClient
@@ -97,7 +98,7 @@ class ReportRepositoryImpl @Inject constructor(
         put("user_id", userId)
         put("pet_name", report.petName)
         put("description", report.description)
-        put("status", report.status)
+        put("status", report.status.value)
         put("image_url", imageUrls.firstOrNull() ?: "")
 
         if (includeImageUrls && imageUrls.isNotEmpty()) {
@@ -269,6 +270,130 @@ class ReportRepositoryImpl @Inject constructor(
     } catch (error: Exception) {
         Log.e(TAG, "Error inesperado en getReportById", error)
         Result.failure(Exception(error.message ?: "No se pudo cargar el reporte. Inténtalo de nuevo."))
+    }
+
+    override suspend fun updateReport(
+        reportId: String,
+        report: Report
+    ): Result<Unit> = try {
+        val imageUrls = report.imageUrls.orEmpty()
+            .map { it.trim() }
+            .filter { it.isNotBlank() }
+            .distinct()
+
+        val payload = buildJsonObject {
+            put("pet_name", report.petName.trim())
+            put("description", report.description.trim())
+            put("status", report.status.value)
+            put("image_url", imageUrls.firstOrNull() ?: "")
+        }
+
+        val payloadWithImageUrls = buildJsonObject {
+            payload.forEach { (key, value) -> put(key, value) }
+            // Se envía incluso cuando está vacío para poder eliminar todas las fotos.
+            put("image_urls", buildJsonArray { imageUrls.forEach { add(it) } })
+        }
+
+        val updatedRows = try {
+            patchReport(reportId, payloadWithImageUrls)
+        } catch (error: Exception) {
+            if (!isMissingImageUrlsColumn(error)) throw error
+
+            Log.w(
+                TAG,
+                "La columna image_urls no existe en Supabase. " +
+                    "Se actualizará solo la primera foto hasta aplicar la migración."
+            )
+            patchReport(reportId, payload)
+        }
+
+        if (updatedRows.isEmpty()) {
+            Result.failure(
+                Exception(
+                    "No se pudo actualizar el reporte. " +
+                        "Verifica que seas el dueño del reporte."
+                )
+            )
+        } else {
+            Result.success(Unit)
+        }
+    } catch (error: CancellationException) {
+        throw error
+    } catch (error: HttpRequestException) {
+        Log.e(TAG, "HttpRequestException en updateReport", error)
+        Result.failure(Exception("No hay conexión a internet. Verifica tu red e intenta de nuevo."))
+    } catch (error: RestException) {
+        Log.e(TAG, "RestException en updateReport", error)
+        Result.failure(
+            Exception(
+                friendlyMessage(error)
+                    .replace("publicar el reporte", "actualizar el reporte")
+            )
+        )
+    } catch (error: Exception) {
+        Log.e(TAG, "Error inesperado en updateReport", error)
+        Result.failure(
+            Exception(error.message ?: "No se pudo actualizar el reporte. Inténtalo de nuevo.")
+        )
+    }
+
+    private suspend fun patchReport(
+        reportId: String,
+        payload: JsonObject
+    ): List<JsonObject> = supabaseClient
+        .from(REPORTS_TABLE)
+        .update(
+            body = payload,
+            request = {
+                select(Columns.raw("id"))
+                filter { eq("id", reportId) }
+            }
+        )
+        .decodeList<JsonObject>()
+
+    override suspend fun updateReportStatus(
+        reportId: String,
+        status: ReportStatus
+    ): Result<Unit> = try {
+        val updatedRows = supabaseClient
+            .from(REPORTS_TABLE)
+            .update(
+                update = { set("status", status.value) },
+                request = {
+                    select(Columns.raw("id"))
+                    filter { eq("id", reportId) }
+                }
+            )
+            .decodeList<JsonObject>()
+
+        if (updatedRows.isEmpty()) {
+            Result.failure(
+                Exception(
+                    "No se pudo actualizar el estado. " +
+                        "Verifica que seas el dueño del reporte."
+                )
+            )
+        } else {
+            Result.success(Unit)
+        }
+    } catch (error: CancellationException) {
+        throw error
+    } catch (error: HttpRequestException) {
+        Log.e(TAG, "HttpRequestException en updateReportStatus", error)
+        Result.failure(Exception("No hay conexión a internet. Verifica tu red e intenta de nuevo."))
+    } catch (error: RestException) {
+        Log.e(TAG, "RestException en updateReportStatus", error)
+        Result.failure(
+            Exception(
+                friendlyMessage(error)
+                    .replace("publicar el reporte", "actualizar el estado")
+            )
+        )
+    } catch (error: Exception) {
+        Log.e(TAG, "Error inesperado en updateReportStatus", error)
+        Result.failure(
+            Exception(error.message ?: "No se pudo actualizar el estado. Inténtalo de nuevo.")
+        )
     }
 
     /**

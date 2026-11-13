@@ -80,11 +80,11 @@ import androidx.compose.ui.viewinterop.AndroidView
 import androidx.core.content.ContextCompat
 import androidx.core.graphics.createBitmap
 import androidx.core.graphics.drawable.toDrawable
-import androidx.core.graphics.toColorInt
 import androidx.core.graphics.withRotation
 import androidx.hilt.lifecycle.viewmodel.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.app.buscandohuellas.domain.model.Report
+import com.app.buscandohuellas.domain.model.ReportStatus
 import com.app.buscandohuellas.ui.theme.BrandColors
 import org.osmdroid.config.Configuration
 import org.osmdroid.tileprovider.tilesource.TileSourceFactory
@@ -349,12 +349,6 @@ private fun HomeContent(
             verticalArrangement = Arrangement.spacedBy(16.dp)
         ) {
             Text(
-                text = "BUENOS DÍAS",
-                style = MaterialTheme.typography.labelMedium,
-                letterSpacing = 1.sp,
-                color = BrandColors.TextSecondary
-            )
-            Text(
                 text = "Hola, ${state.firstName}",
                 style = MaterialTheme.typography.headlineMedium,
                 fontWeight = FontWeight.Bold,
@@ -446,9 +440,9 @@ private fun MapContent(
 
     // Los iconos solo dependen del estado y la densidad: se reutilizan entre
     // marcadores para no crear un bitmap por cada recomposición.
-    val pawIcons = remember { mutableMapOf<String, Drawable>() }
-    fun pawIcon(status: String): Drawable =
-        pawIcons.getOrPut(status.uppercase()) { getPawPrintDrawable(status) }
+    val pawIcons = remember { mutableMapOf<ReportStatus, Drawable>() }
+    fun pawIcon(status: ReportStatus): Drawable =
+        pawIcons.getOrPut(status) { getPawPrintDrawable(status.value) }
 
     LaunchedEffect(userLocation) {
         val location = userLocation ?: return@LaunchedEffect
@@ -491,7 +485,7 @@ private fun MapContent(
                                 id = REPORT_MARKER_ID
                                 position = GeoPoint(report.latitude, report.longitude)
                                 title = report.petName
-                                snippet = "${report.status}\n${report.description}"
+                                snippet = "${report.status.label}\n${report.description}"
                                 icon = pawIcon(report.status)
                                 setAnchor(Marker.ANCHOR_CENTER, Marker.ANCHOR_BOTTOM)
                                 setOnMarkerClickListener { _, _ ->
@@ -633,12 +627,7 @@ private fun MapActivationPlaceholder(modifier: Modifier = Modifier) {
  * sobre el mapa.
  */
 private fun getPawPrintDrawable(status: String): Drawable {
-    val pawColor = when (status.uppercase()) {
-        "LOST" -> "#DC2626".toColorInt()
-        "FOUND" -> "#059669".toColorInt()
-        "SIGHTED" -> "#2563EB".toColorInt()
-        else -> "#6B7280".toColorInt()
-    }
+    val pawColor = ReportStatus.fromString(status).mapColor
 
     val displayMetrics = Resources.getSystem().displayMetrics
     val density = displayMetrics.density
@@ -925,7 +914,7 @@ private fun MapContentPreview() {
                     userId = "1",
                     petName = "Luna",
                     description = "Beagle perdida",
-                    status = "LOST",
+                    status = ReportStatus.LOST,
                     latitude = 40.4200,
                     longitude = -3.6900
                 ),
@@ -933,7 +922,7 @@ private fun MapContentPreview() {
                     userId = "2",
                     petName = "Nala",
                     description = "Gatita encontrada",
-                    status = "FOUND",
+                    status = ReportStatus.FOUND,
                     latitude = 40.4250,
                     longitude = -3.7050
                 )

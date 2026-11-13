@@ -1,6 +1,7 @@
 package com.app.buscandohuellas.data.dto
 
 import com.app.buscandohuellas.domain.model.Report
+import com.app.buscandohuellas.domain.model.ReportStatus
 import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
 import java.nio.ByteBuffer
@@ -49,7 +50,7 @@ data class ReportDto(
             userId = userId,
             petName = petName.ifBlank { "Sin nombre" },
             description = description ?: "",
-            status = status,
+            status = ReportStatus.fromString(status),
             imageUrl = imageUrl,
             imageUrls = imageUrls
                 ?.map { it.trim() }

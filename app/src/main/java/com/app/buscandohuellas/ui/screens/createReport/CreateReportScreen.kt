@@ -7,6 +7,7 @@ import android.widget.Toast
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -64,6 +65,8 @@ import androidx.compose.ui.graphics.PathEffect
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.core.content.ContextCompat
@@ -71,6 +74,8 @@ import androidx.hilt.lifecycle.viewmodel.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import coil.compose.AsyncImage
 import coil.request.ImageRequest
+import com.app.buscandohuellas.domain.model.ReportStatus
+import com.app.buscandohuellas.ui.theme.BrandColors
 import java.util.Locale
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -83,6 +88,7 @@ fun CreateReportScreen(
     val uiState by viewModel.uiState.collectAsStateWithLifecycle()
     val petName by viewModel.petName.collectAsStateWithLifecycle()
     val description by viewModel.description.collectAsStateWithLifecycle()
+    val selectedStatus by viewModel.selectedStatus.collectAsStateWithLifecycle()
     val latitude by viewModel.latitude.collectAsStateWithLifecycle()
     val longitude by viewModel.longitude.collectAsStateWithLifecycle()
     val isLocationLoading by viewModel.isLocationLoading.collectAsStateWithLifecycle()
@@ -207,6 +213,12 @@ fun CreateReportScreen(
                 modifier = Modifier.fillMaxWidth()
             )
 
+            StatusSelector(
+                selectedStatus = selectedStatus,
+                enabled = uiState !is CreateReportUiState.Loading,
+                onStatusSelected = viewModel::onStatusSelected
+            )
+
             LocationSection(
                 isLocationLoading = isLocationLoading,
                 latitude = latitude,
@@ -301,6 +313,72 @@ fun CreateReportScreen(
             },
             onCancel = { viewModel.closeMapPicker() }
         )
+    }
+}
+
+@Composable
+private fun StatusSelector(
+    selectedStatus: ReportStatus,
+    enabled: Boolean,
+    onStatusSelected: (ReportStatus) -> Unit,
+    modifier: Modifier = Modifier
+) {
+    Column(modifier = modifier.fillMaxWidth()) {
+        Text(
+            text = "Estado del reporte",
+            style = MaterialTheme.typography.titleSmall,
+            fontWeight = FontWeight.SemiBold,
+            color = BrandColors.TextPrimary
+        )
+
+        Spacer(modifier = Modifier.height(8.dp))
+
+        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            ReportStatus.entries.forEach { status ->
+                val selected = status == selectedStatus
+                val shape = RoundedCornerShape(12.dp)
+
+                Column(
+                    modifier = Modifier
+                        .weight(1f)
+                        .height(64.dp)
+                        .clip(shape)
+                        .background(status.backgroundColor)
+                        .border(
+                            width = if (selected) 2.dp else 1.dp,
+                            color = if (selected) {
+                                status.textColor
+                            } else {
+                                status.textColor.copy(alpha = 0.25f)
+                            },
+                            shape = shape
+                        )
+                        .clickable(enabled = enabled) { onStatusSelected(status) }
+                        .padding(horizontal = 8.dp, vertical = 8.dp),
+                    horizontalAlignment = Alignment.CenterHorizontally,
+                    verticalArrangement = Arrangement.Center
+                ) {
+                    if (selected) {
+                        Icon(
+                            imageVector = Icons.Filled.CheckCircle,
+                            contentDescription = "Estado seleccionado",
+                            tint = status.textColor,
+                            modifier = Modifier.size(18.dp)
+                        )
+                        Spacer(modifier = Modifier.height(4.dp))
+                    }
+
+                    Text(
+                        text = status.label,
+                        style = MaterialTheme.typography.labelMedium,
+                        fontWeight = if (selected) FontWeight.Bold else FontWeight.Medium,
+                        color = status.textColor,
+                        textAlign = TextAlign.Center,
+                        maxLines = 1
+                    )
+                }
+            }
+        }
     }
 }
 

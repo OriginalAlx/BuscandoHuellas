@@ -8,8 +8,10 @@ import android.content.res.Resources
 import android.graphics.Canvas
 import android.graphics.Paint
 import android.graphics.drawable.Drawable
+import androidx.compose.animation.animateColorAsState
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.awaitEachGesture
 import androidx.compose.foundation.gestures.awaitFirstDown
@@ -43,6 +45,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.filled.Chat
 import androidx.compose.material.icons.automirrored.filled.Send
+import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.Flag
@@ -52,6 +55,7 @@ import androidx.compose.material.icons.filled.Pets
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Share
 import androidx.compose.material.icons.filled.ZoomOutMap
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
@@ -73,6 +77,7 @@ import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
@@ -114,6 +119,8 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import coil.compose.AsyncImage
 import coil.request.ImageRequest
 import com.app.buscandohuellas.domain.model.Report
+import com.app.buscandohuellas.domain.model.ReportStatus
+import com.app.buscandohuellas.ui.components.StatusBadge
 import com.app.buscandohuellas.ui.theme.BrandColors
 import kotlinx.coroutines.launch
 import org.osmdroid.config.Configuration
@@ -130,10 +137,15 @@ private const val MAX_ZOOM = 5f
 @Composable
 fun ReportDetailScreen(
     onNavigateBack: () -> Unit,
+    onEditClick: () -> Unit = {},
+    refreshSignal: Int = 0,
     viewModel: ReportDetailViewModel = hiltViewModel()
 ) {
     val uiState by viewModel.uiState.collectAsStateWithLifecycle()
     val sightingInput by viewModel.sightingInput.collectAsStateWithLifecycle()
+    val isStatusChanging by viewModel.isStatusChanging.collectAsStateWithLifecycle()
+    val showStatusSelector by viewModel.showStatusSelector.collectAsStateWithLifecycle()
+    val snackbarMessage by viewModel.snackbarMessage.collectAsStateWithLifecycle()
 
     val context = LocalContext.current
     val snackbarHostState = remember { SnackbarHostState() }
@@ -158,6 +170,18 @@ fun ReportDetailScreen(
         if (granted) {
             viewModel.getCurrentLocation(context)
         }
+    }
+
+    LaunchedEffect(refreshSignal) {
+        if (refreshSignal > 0) {
+            viewModel.refresh()
+        }
+    }
+
+    LaunchedEffect(snackbarMessage) {
+        val message = snackbarMessage ?: return@LaunchedEffect
+        snackbarHostState.showSnackbar(message)
+        viewModel.onSnackbarShown()
     }
 
     Scaffold(
@@ -225,13 +249,13 @@ fun ReportDetailScreen(
             is DetailUiState.Success -> DetailContent(
                 state = state,
                 contentPadding = paddingValues,
+                isStatusChanging = isStatusChanging,
                 onExpandPhoto = { page -> fullScreenStartPage = page },
+                onStatusClick = viewModel::openStatusSelector,
                 onContactClick = {
                     showMessage("El canal de contacto con el dueño estará disponible pronto.")
                 },
-                onEditClick = {
-                    showMessage("Solo el dueño del reporte puede editarlo.")
-                },
+                onEditClick = onEditClick,
                 onReportClick = {
                     showMessage("Gracias, revisaremos este reporte.")
                 },
@@ -253,6 +277,15 @@ fun ReportDetailScreen(
                 onDismiss = { fullScreenStartPage = null }
             )
         }
+    }
+
+    if (showStatusSelector && successState != null) {
+        StatusSelectorDialog(
+            currentStatus = successState.report.status,
+            isStatusChanging = isStatusChanging,
+            onDismiss = viewModel::dismissStatusSelector,
+            onStatusSelected = viewModel::changeReportStatus
+        )
     }
 }
 
@@ -334,7 +367,9 @@ private fun ErrorState(
 private fun DetailContent(
     state: DetailUiState.Success,
     contentPadding: PaddingValues,
+    isStatusChanging: Boolean,
     onExpandPhoto: (Int) -> Unit,
+    onStatusClick: () -> Unit,
     onContactClick: () -> Unit,
     onEditClick: () -> Unit,
     onReportClick: () -> Unit,
@@ -383,6 +418,16 @@ private fun DetailContent(
                     avatarUrl = state.userAvatarUrl,
                     onProfileClick = onProfileClick
                 )
+
+                if (state.isOwner) {
+                    Spacer(modifier = Modifier.height(16.dp))
+
+                    OwnerStatusButton(
+                        status = report.status,
+                        isStatusChanging = isStatusChanging,
+                        onClick = onStatusClick
+                    )
+                }
 
                 Text(
                     text = report.description.ifBlank { "Sin descripción." },
@@ -457,7 +502,7 @@ private fun PetHeader(state: DetailUiState.Success) {
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(10.dp)
         ) {
-            StatusPill(status = state.report.status)
+            StatusBadge(status = state.report.status)
 
             if (state.relativeTime.isNotBlank()) {
                 Text(
@@ -471,22 +516,157 @@ private fun PetHeader(state: DetailUiState.Success) {
 }
 
 @Composable
-private fun StatusPill(status: String) {
-    val style = statusStyle(status)
+private fun OwnerStatusButton(
+    status: ReportStatus,
+    isStatusChanging: Boolean,
+    onClick: () -> Unit
+) {
+    val containerColor by animateColorAsState(
+        targetValue = status.backgroundColor,
+        label = "ownerStatusContainer"
+    )
+    val contentColor by animateColorAsState(
+        targetValue = status.textColor,
+        label = "ownerStatusContent"
+    )
 
-    Box(
+    Card(
         modifier = Modifier
-            .clip(RoundedCornerShape(50))
-            .background(style.container)
-            .padding(horizontal = 12.dp, vertical = 6.dp)
+            .fillMaxWidth()
+            .clickable(enabled = !isStatusChanging, onClick = onClick),
+        shape = RoundedCornerShape(14.dp),
+        colors = CardDefaults.cardColors(containerColor = containerColor),
+        elevation = CardDefaults.cardElevation(defaultElevation = 0.dp)
+    ) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 16.dp, vertical = 14.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Column(modifier = Modifier.weight(1f)) {
+                Text(
+                    text = "ESTADO DEL REPORTE",
+                    style = MaterialTheme.typography.labelSmall,
+                    fontWeight = FontWeight.Medium,
+                    letterSpacing = 0.8.sp,
+                    color = contentColor.copy(alpha = 0.8f)
+                )
+                Spacer(modifier = Modifier.height(2.dp))
+                Text(
+                    text = status.label,
+                    style = MaterialTheme.typography.titleMedium,
+                    fontWeight = FontWeight.Bold,
+                    color = contentColor
+                )
+            }
+
+            if (isStatusChanging) {
+                CircularProgressIndicator(
+                    modifier = Modifier.size(20.dp),
+                    color = contentColor,
+                    strokeWidth = 2.dp
+                )
+            } else {
+                Text(
+                    text = "Cambiar",
+                    style = MaterialTheme.typography.labelMedium,
+                    fontWeight = FontWeight.SemiBold,
+                    color = contentColor
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun StatusSelectorDialog(
+    currentStatus: ReportStatus,
+    isStatusChanging: Boolean,
+    onDismiss: () -> Unit,
+    onStatusSelected: (ReportStatus) -> Unit
+) {
+    AlertDialog(
+        onDismissRequest = { if (!isStatusChanging) onDismiss() },
+        title = {
+            Text(
+                text = "Cambiar estado",
+                style = MaterialTheme.typography.titleMedium,
+                fontWeight = FontWeight.Bold,
+                color = BrandColors.TextPrimary
+            )
+        },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                Text(
+                    text = "Selecciona el estado actual del reporte.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = BrandColors.TextSecondary
+                )
+
+                ReportStatus.entries.forEach { status ->
+                    StatusOption(
+                        status = status,
+                        selected = status == currentStatus,
+                        enabled = !isStatusChanging,
+                        onClick = { onStatusSelected(status) }
+                    )
+                }
+            }
+        },
+        confirmButton = {},
+        dismissButton = {
+            TextButton(onClick = onDismiss, enabled = !isStatusChanging) {
+                Text("Cancelar")
+            }
+        },
+        containerColor = BrandColors.Surface
+    )
+}
+
+@Composable
+private fun StatusOption(
+    status: ReportStatus,
+    selected: Boolean,
+    enabled: Boolean,
+    onClick: () -> Unit
+) {
+    val shape = RoundedCornerShape(12.dp)
+
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(shape)
+            .background(status.backgroundColor)
+            .border(
+                width = if (selected) 2.dp else 1.dp,
+                color = if (selected) {
+                    status.textColor
+                } else {
+                    status.textColor.copy(alpha = 0.25f)
+                },
+                shape = shape
+            )
+            .clickable(enabled = enabled, onClick = onClick)
+            .padding(horizontal = 14.dp, vertical = 12.dp),
+        verticalAlignment = Alignment.CenterVertically
     ) {
         Text(
-            text = style.label,
-            style = MaterialTheme.typography.labelSmall,
-            fontWeight = FontWeight.Bold,
-            letterSpacing = 0.6.sp,
-            color = style.content
+            text = status.label,
+            style = MaterialTheme.typography.bodyLarge,
+            fontWeight = if (selected) FontWeight.Bold else FontWeight.Medium,
+            color = status.textColor,
+            modifier = Modifier.weight(1f)
         )
+
+        if (selected) {
+            Icon(
+                imageVector = Icons.Filled.Check,
+                contentDescription = "Estado seleccionado",
+                tint = status.textColor,
+                modifier = Modifier.size(20.dp)
+            )
+        }
     }
 }
 
@@ -1209,18 +1389,6 @@ private fun redMarkerDrawable(): Drawable {
     canvas.drawCircle(size / 2f, size / 2f, radius, borderPaint)
 
     return bitmap.toDrawable(Resources.getSystem())
-}
-
-private data class StatusStyle(
-    val label: String,
-    val container: Color,
-    val content: Color
-)
-
-private fun statusStyle(status: String): StatusStyle = when (status.uppercase()) {
-    "FOUND" -> StatusStyle("ENCONTRADA", BrandColors.SuccessLight, BrandColors.Success)
-    "SIGHTED" -> StatusStyle("AVISTADA", BrandColors.InfoLight, BrandColors.Info)
-    else -> StatusStyle("PERDIDA", BrandColors.AccentLight, BrandColors.Accent)
 }
 
 private fun initialsOf(name: String): String {

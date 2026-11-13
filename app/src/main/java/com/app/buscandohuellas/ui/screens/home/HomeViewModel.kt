@@ -215,11 +215,7 @@ class HomeViewModel @Inject constructor(
             id = id.orEmpty(),
             petName = petName,
             breed = description.ifBlank { "Sin descripción" },
-            status = when (status.uppercase()) {
-                "FOUND" -> PetReportStatus.FOUND
-                "SIGHTED" -> PetReportStatus.FOUND
-                else -> PetReportStatus.LOST
-            },
+            status = status,
             imageUrl = images.firstOrNull(),
             imageUrls = images,
             latitude = latitude,

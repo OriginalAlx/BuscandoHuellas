@@ -9,6 +9,7 @@ import androidx.core.content.FileProvider
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.app.buscandohuellas.domain.model.Report
+import com.app.buscandohuellas.domain.model.ReportStatus
 import com.app.buscandohuellas.domain.repository.ReportRepository
 import com.google.android.gms.location.FusedLocationProviderClient
 import com.google.android.gms.location.LocationServices
@@ -49,6 +50,9 @@ class CreateReportViewModel @Inject constructor(
     private val _description = MutableStateFlow("")
     val description: StateFlow<String> = _description.asStateFlow()
 
+    private val _selectedStatus = MutableStateFlow(ReportStatus.LOST)
+    val selectedStatus: StateFlow<ReportStatus> = _selectedStatus.asStateFlow()
+
     private val _latitude = MutableStateFlow<Double?>(null)
     val latitude: StateFlow<Double?> = _latitude.asStateFlow()
 
@@ -76,6 +80,11 @@ class CreateReportViewModel @Inject constructor(
 
     fun onDescriptionChange(value: String) {
         _description.value = value
+    }
+
+    fun onStatusSelected(status: ReportStatus) {
+        _selectedStatus.value = status
+        clearError()
     }
 
     
@@ -241,7 +250,7 @@ class CreateReportViewModel @Inject constructor(
                     userId = "",
                     petName = petName,
                     description = _description.value.trim(),
-                    status = "LOST",
+                    status = _selectedStatus.value,
                     imageUrl = uploadedUrls.firstOrNull(),
                     imageUrls = uploadedUrls.takeIf { it.isNotEmpty() },
                     latitude = latitude,

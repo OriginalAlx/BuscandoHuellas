@@ -6,7 +6,7 @@ data class Report(
     val userId: String,
     val petName: String,
     val description: String,
-    val status: String = "LOST",
+    val status: ReportStatus = ReportStatus.LOST,
     val imageUrl: String? = null,
     val imageUrls: List<String>? = null,
     val createdAt: String? = null,
