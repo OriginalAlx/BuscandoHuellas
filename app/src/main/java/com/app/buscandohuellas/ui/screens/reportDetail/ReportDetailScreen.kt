@@ -120,6 +120,7 @@ import coil.compose.AsyncImage
 import coil.request.ImageRequest
 import com.app.buscandohuellas.domain.model.Report
 import com.app.buscandohuellas.domain.model.ReportStatus
+import com.app.buscandohuellas.ui.components.ReportReasonBottomSheet
 import com.app.buscandohuellas.ui.components.StatusBadge
 import com.app.buscandohuellas.ui.theme.BrandColors
 import kotlinx.coroutines.launch
@@ -146,6 +147,11 @@ fun ReportDetailScreen(
     val isStatusChanging by viewModel.isStatusChanging.collectAsStateWithLifecycle()
     val showStatusSelector by viewModel.showStatusSelector.collectAsStateWithLifecycle()
     val snackbarMessage by viewModel.snackbarMessage.collectAsStateWithLifecycle()
+    val showReportSheet by viewModel.showReportSheet.collectAsStateWithLifecycle()
+    val selectedReason by viewModel.selectedReason.collectAsStateWithLifecycle()
+    val customReasonText by viewModel.customReasonText.collectAsStateWithLifecycle()
+    val isSubmittingReport by viewModel.isSubmittingReport.collectAsStateWithLifecycle()
+    val currentUserId by viewModel.currentUserId.collectAsStateWithLifecycle()
 
     val context = LocalContext.current
     val snackbarHostState = remember { SnackbarHostState() }
@@ -206,6 +212,16 @@ fun ReportDetailScreen(
                 },
                 actions = {
                     IconButton(
+                        onClick = viewModel::openReportSheet,
+                        enabled = successState != null
+                    ) {
+                        Icon(
+                            imageVector = Icons.Filled.Flag,
+                            contentDescription = "Reportar publicación",
+                            tint = BrandColors.TextPrimary
+                        )
+                    }
+                    IconButton(
                         onClick = {
                             successState?.report?.let { shareReport(context, it) }
                         },
@@ -256,9 +272,7 @@ fun ReportDetailScreen(
                     showMessage("El canal de contacto con el dueño estará disponible pronto.")
                 },
                 onEditClick = onEditClick,
-                onReportClick = {
-                    showMessage("Gracias, revisaremos este reporte.")
-                },
+                onReportClick = viewModel::openReportSheet,
                 onProfileClick = {
                     showMessage("El perfil del reportante estará disponible pronto.")
                 }
@@ -287,6 +301,20 @@ fun ReportDetailScreen(
             onStatusSelected = viewModel::changeReportStatus
         )
     }
+
+    ReportReasonBottomSheet(
+        isVisible = showReportSheet,
+        onDismiss = viewModel::closeReportSheet,
+        onSubmit = {
+            val reportId = successState?.report?.id.orEmpty()
+            viewModel.submitReportAction(reportId, currentUserId.orEmpty())
+        },
+        selectedReason = selectedReason,
+        onReasonSelected = viewModel::selectReason,
+        customReasonText = customReasonText,
+        onCustomReasonChanged = viewModel::updateCustomReason,
+        isSubmitting = isSubmittingReport
+    )
 }
 
 @Composable

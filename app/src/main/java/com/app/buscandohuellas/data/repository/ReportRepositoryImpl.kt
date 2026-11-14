@@ -6,6 +6,7 @@ import android.util.Log
 import com.app.buscandohuellas.data.dto.ReportDto
 import com.app.buscandohuellas.domain.model.Report
 import com.app.buscandohuellas.domain.model.ReportImageUploadResult
+import com.app.buscandohuellas.domain.model.ReportReason
 import com.app.buscandohuellas.domain.model.ReportStatus
 import com.app.buscandohuellas.domain.repository.ReportRepository
 import dagger.hilt.android.qualifiers.ApplicationContext
@@ -396,6 +397,54 @@ class ReportRepositoryImpl @Inject constructor(
         )
     }
 
+    override suspend fun submitReport(
+        reportId: String,
+        reporterId: String,
+        reason: ReportReason,
+        customReasonText: String?
+    ): Result<Unit> = try {
+        val trimmedCustomReason = customReasonText?.trim().orEmpty()
+
+        val payload = buildJsonObject {
+            put("report_id", reportId)
+            put("reporter_id", reporterId)
+            put("reason", reason.value)
+            if (trimmedCustomReason.isNotBlank()) {
+                put("custom_reason_text", trimmedCustomReason)
+            }
+        }
+
+        supabaseClient.from(REPORT_FLAGS_TABLE).insert(payload)
+        Result.success(Unit)
+    } catch (error: CancellationException) {
+        throw error
+    } catch (error: HttpRequestException) {
+        Log.e(TAG, "HttpRequestException en submitReport", error)
+        Result.failure(Exception("No hay conexión a internet. Verifica tu red e intenta de nuevo."))
+    } catch (error: RestException) {
+        Log.e(TAG, "RestException en submitReport", error)
+        val message = error.message.orEmpty()
+        val messageForUser = when {
+            message.contains("duplicate key", ignoreCase = true) ||
+                message.contains("23505") ||
+                message.contains("unique", ignoreCase = true) ->
+                "Ya reportaste esta publicación."
+
+            message.contains("row-level security", ignoreCase = true) ||
+                message.contains("permission denied", ignoreCase = true) ||
+                message.contains("violates row-level", ignoreCase = true) ->
+                "No tienes permiso para reportar esta publicación."
+
+            else -> "No se pudo enviar el reporte. Inténtalo de nuevo."
+        }
+        Result.failure(Exception(messageForUser))
+    } catch (error: Exception) {
+        Log.e(TAG, "Error inesperado en submitReport", error)
+        Result.failure(
+            Exception(error.message ?: "No se pudo enviar el reporte. Inténtalo de nuevo.")
+        )
+    }
+
     /**
      * Consulta los reportes con el perfil del reportante embebido mediante la
      * relación PostgREST `reports.user_id -> profiles.id`.
@@ -475,6 +524,7 @@ class ReportRepositoryImpl @Inject constructor(
 
         private const val REPORTS_TABLE = "reports"
         private const val REPORTS_VIEW = "reports_view"
+        private const val REPORT_FLAGS_TABLE = "report_flags"
 
         /**
          * `profiles(...)` usa la relación PostgREST creada por la FK

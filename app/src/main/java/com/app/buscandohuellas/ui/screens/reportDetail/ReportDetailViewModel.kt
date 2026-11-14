@@ -8,6 +8,7 @@ import androidx.lifecycle.SavedStateHandle
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.app.buscandohuellas.domain.model.Report
+import com.app.buscandohuellas.domain.model.ReportReason
 import com.app.buscandohuellas.domain.model.ReportStatus
 import com.app.buscandohuellas.domain.repository.AuthRepository
 import com.app.buscandohuellas.domain.repository.ReportRepository
@@ -57,6 +58,21 @@ class ReportDetailViewModel @Inject constructor(
     private val _snackbarMessage = MutableStateFlow<String?>(null)
     val snackbarMessage: StateFlow<String?> = _snackbarMessage.asStateFlow()
 
+    private val _showReportSheet = MutableStateFlow(false)
+    val showReportSheet: StateFlow<Boolean> = _showReportSheet.asStateFlow()
+
+    private val _selectedReason = MutableStateFlow<ReportReason?>(null)
+    val selectedReason: StateFlow<ReportReason?> = _selectedReason.asStateFlow()
+
+    private val _customReasonText = MutableStateFlow("")
+    val customReasonText: StateFlow<String> = _customReasonText.asStateFlow()
+
+    private val _isSubmittingReport = MutableStateFlow(false)
+    val isSubmittingReport: StateFlow<Boolean> = _isSubmittingReport.asStateFlow()
+
+    private val _currentUserId = MutableStateFlow<String?>(null)
+    val currentUserId: StateFlow<String?> = _currentUserId.asStateFlow()
+
     private var loadedReport: Report? = null
     private var userLocation: GeoPoint? = null
     private var currentUserName: String? = null
@@ -83,7 +99,9 @@ class ReportDetailViewModel @Inject constructor(
             reportRepository.getReportById(reportId)
                 .onSuccess { report ->
                     loadedReport = report
-                    isOwner = supabaseClient.auth.currentUserOrNull()?.id == report.userId
+                    val currentUserId = supabaseClient.auth.currentUserOrNull()?.id
+                    _currentUserId.value = currentUserId
+                    isOwner = currentUserId == report.userId
                     resolveReporter(report)
                     publishSuccess(report)
                 }
@@ -109,7 +127,9 @@ class ReportDetailViewModel @Inject constructor(
             reportRepository.getReportById(reportId)
                 .onSuccess { report ->
                     loadedReport = report
-                    isOwner = supabaseClient.auth.currentUserOrNull()?.id == report.userId
+                    val currentUserId = supabaseClient.auth.currentUserOrNull()?.id
+                    _currentUserId.value = currentUserId
+                    isOwner = currentUserId == report.userId
                     resolveReporter(report)
                     publishSuccess(report)
                 }
@@ -171,6 +191,86 @@ class ReportDetailViewModel @Inject constructor(
                 }
 
             _isStatusChanging.value = false
+        }
+    }
+
+    fun openReportSheet() {
+        if (loadedReport == null) return
+
+        _selectedReason.value = null
+        _customReasonText.value = ""
+        _isSubmittingReport.value = false
+        _showReportSheet.value = true
+    }
+
+    fun closeReportSheet() {
+        if (_isSubmittingReport.value) return
+        _showReportSheet.value = false
+    }
+
+    fun selectReason(reason: ReportReason) {
+        _selectedReason.value = reason
+        if (reason != ReportReason.OTHER) {
+            _customReasonText.value = ""
+        }
+    }
+
+    fun updateCustomReason(text: String) {
+        _customReasonText.value = text.take(MAX_CUSTOM_REASON_LENGTH)
+    }
+
+    /**
+     * Valida el motivo seleccionado y envía el reporte de la publicación.
+     * Al completarse cierra el bottom sheet y publica el mensaje de éxito en
+     * [snackbarMessage] para que la pantalla lo muestre.
+     */
+    fun submitReportAction(reportId: String, currentUserId: String) {
+        if (_isSubmittingReport.value) return
+
+        val reason = _selectedReason.value
+        if (reason == null) {
+            _snackbarMessage.value = "Selecciona un motivo para reportar la publicación."
+            return
+        }
+
+        val customReason = _customReasonText.value.trim()
+        if (reason == ReportReason.OTHER && customReason.isBlank()) {
+            _snackbarMessage.value = "Describe brevemente el motivo del reporte."
+            return
+        }
+
+        if (reportId.isBlank() || currentUserId.isBlank()) {
+            _snackbarMessage.value = "No se pudo identificar el reporte o tu usuario."
+            return
+        }
+
+        _isSubmittingReport.value = true
+
+        viewModelScope.launch {
+            reportRepository.submitReport(
+                reportId = reportId,
+                reporterId = currentUserId,
+                reason = reason,
+                customReasonText = customReason.takeIf { it.isNotBlank() }
+            )
+                .onSuccess {
+                    _showReportSheet.value = false
+                    _selectedReason.value = null
+                    _customReasonText.value = ""
+                    _snackbarMessage.value =
+                        "Gracias por reportar. Nuestro equipo lo revisará pronto."
+                }
+                .onFailure { error ->
+                    Log.e(
+                        TAG,
+                        "No se pudo reportar la publicación $reportId",
+                        error
+                    )
+                    _snackbarMessage.value = error.message
+                        ?: "No se pudo enviar el reporte. Inténtalo de nuevo."
+                }
+
+            _isSubmittingReport.value = false
         }
     }
 
@@ -282,6 +382,7 @@ class ReportDetailViewModel @Inject constructor(
     companion object {
         private const val TAG = "ReportDetailViewModel"
         private const val MAX_SIGHTING_LENGTH = 280
+        private const val MAX_CUSTOM_REASON_LENGTH = 500
         internal const val NO_LOCATION_LABEL = "Ubicación no disponible"
 
         const val REPORT_ID_ARG = "reportId"
