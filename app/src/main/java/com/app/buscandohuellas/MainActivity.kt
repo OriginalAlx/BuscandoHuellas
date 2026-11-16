@@ -9,20 +9,9 @@ import androidx.compose.animation.core.FastOutSlowInEasing
 import androidx.compose.animation.core.tween
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
-import androidx.compose.foundation.layout.Arrangement
-import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.Spacer
-import androidx.compose.foundation.layout.fillMaxSize
-import androidx.compose.foundation.layout.height
-import androidx.compose.foundation.layout.padding
-import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
-import androidx.compose.ui.Alignment
-import androidx.compose.ui.Modifier
 import androidx.compose.ui.tooling.preview.Preview
-import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.navigation.NavHostController
 import androidx.navigation.NavType
@@ -34,6 +23,7 @@ import com.app.buscandohuellas.ui.screens.createReport.CreateReportScreen
 import com.app.buscandohuellas.ui.screens.editReport.EditReportScreen
 import com.app.buscandohuellas.ui.screens.home.HomeScreen
 import com.app.buscandohuellas.ui.screens.login.LoginScreen
+import com.app.buscandohuellas.ui.screens.moderator.ModeratorScreen
 import com.app.buscandohuellas.ui.screens.register.RegisterScreen
 import com.app.buscandohuellas.ui.screens.reportDetail.ReportDetailScreen
 import com.app.buscandohuellas.ui.theme.BuscandoHuellasTheme
@@ -184,32 +174,18 @@ fun AppNavHost(navController: NavHostController = rememberNavController()) {
         }
 
         composable("moderator_dashboard") {
-            PlaceholderScreen(
-                titulo = "Panel de moderador",
-                mensaje = "Sesión iniciada como moderador. Aquí va el panel de moderación."
+            ModeratorScreen(
+                onReportClick = { reportId ->
+                    if (reportId.isNotBlank()) {
+                        navController.navigate("report_detail/$reportId")
+                    }
+                },
+                onLogout = {
+                    navController.navigate("login") {
+                        popUpTo(0) { inclusive = true }
+                    }
+                }
             )
         }
-    }
-}
-
-@Composable
-private fun PlaceholderScreen(titulo: String, mensaje: String) {
-    Column(
-        modifier = Modifier
-            .fillMaxSize()
-            .padding(24.dp),
-        verticalArrangement = Arrangement.Center,
-        horizontalAlignment = Alignment.CenterHorizontally
-    ) {
-        Text(
-            text = titulo,
-            style = MaterialTheme.typography.headlineMedium
-        )
-        Spacer(modifier = Modifier.height(16.dp))
-        Text(
-            text = mensaje,
-            style = MaterialTheme.typography.bodyLarge,
-            color = MaterialTheme.colorScheme.onSurfaceVariant
-        )
     }
 }

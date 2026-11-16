@@ -8,6 +8,7 @@ import com.app.buscandohuellas.domain.model.Report
 import com.app.buscandohuellas.domain.model.ReportImageUploadResult
 import com.app.buscandohuellas.domain.model.ReportReason
 import com.app.buscandohuellas.domain.model.ReportStatus
+import com.app.buscandohuellas.domain.model.ReportedPost
 import com.app.buscandohuellas.domain.repository.ReportRepository
 import dagger.hilt.android.qualifiers.ApplicationContext
 import io.github.jan.supabase.SupabaseClient
@@ -20,6 +21,8 @@ import io.github.jan.supabase.storage.storage
 import io.ktor.client.plugins.HttpRequestTimeoutException
 import io.ktor.http.ContentType
 import kotlinx.coroutines.CancellationException
+import kotlinx.serialization.SerialName
+import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.add
 import kotlinx.serialization.json.buildJsonArray
@@ -30,6 +33,7 @@ import java.time.LocalDateTime
 import java.time.OffsetDateTime
 import java.time.ZoneOffset
 import java.time.format.DateTimeParseException
+import java.util.Locale
 import java.util.UUID
 import javax.inject.Inject
 
@@ -368,12 +372,7 @@ class ReportRepositoryImpl @Inject constructor(
             .decodeList<JsonObject>()
 
         if (updatedRows.isEmpty()) {
-            Result.failure(
-                Exception(
-                    "No se pudo actualizar el estado. " +
-                        "Verifica que seas el dueño del reporte."
-                )
-            )
+            Result.failure(Exception(NO_PERMISSION_MESSAGE))
         } else {
             Result.success(Unit)
         }
@@ -443,6 +442,318 @@ class ReportRepositoryImpl @Inject constructor(
         Result.failure(
             Exception(error.message ?: "No se pudo enviar el reporte. Inténtalo de nuevo.")
         )
+    }
+
+    override suspend fun deleteReport(reportId: String): Result<Unit> = try {
+        // Si la lectura falla, se continúa: el reporte debe poder eliminarse
+        // aunque ya no se puedan recuperar las URLs de sus imágenes.
+        val imageUrls = getReportById(reportId).getOrNull()?.allImageUrls.orEmpty()
+
+        val deletedRows = supabaseClient
+            .from(REPORTS_TABLE)
+            .delete(
+                request = {
+                    select(Columns.raw("id"))
+                    filter { eq("id", reportId) }
+                }
+            )
+            .decodeList<JsonObject>()
+
+        if (deletedRows.isEmpty()) {
+            Result.failure(Exception(NO_PERMISSION_MESSAGE))
+        } else {
+            imageUrls.forEach { imageUrl ->
+                runBestEffort("No se pudo eliminar la imagen $imageUrl") {
+                    deleteReportImage(imageUrl)
+                }
+            }
+            runBestEffort("No se pudo registrar la acción DELETE") {
+                logModerationAction(reportId, ACTION_DELETE, null)
+            }
+            Result.success(Unit)
+        }
+    } catch (error: CancellationException) {
+        throw error
+    } catch (error: RestException) {
+        Log.e(TAG, "RestException en deleteReport", error)
+        Result.failure(Exception(moderationRestMessage(error, "eliminar el reporte")))
+    } catch (error: HttpRequestException) {
+        Log.e(TAG, "HttpRequestException en deleteReport", error)
+        Result.failure(Exception("No hay conexión a internet. Verifica tu red e intenta de nuevo."))
+    } catch (error: Exception) {
+        Log.e(TAG, "Error inesperado en deleteReport", error)
+        Result.failure(Exception("No se pudo eliminar el reporte. Inténtalo de nuevo."))
+    }
+
+    override suspend fun updateReportAsModerator(
+        reportId: String,
+        description: String,
+        status: ReportStatus,
+        reason: String?
+    ): Result<Unit> = try {
+        val cleanDescription = description.trim()
+        if (cleanDescription.isBlank()) {
+            return Result.failure(Exception("La descripción no puede estar vacía."))
+        }
+
+        val updatedRows = supabaseClient
+            .from(REPORTS_TABLE)
+            .update(
+                body = buildJsonObject {
+                    put("description", cleanDescription)
+                    put("status", status.value)
+                },
+                request = {
+                    select(Columns.raw("id"))
+                    filter { eq("id", reportId) }
+                }
+            )
+            .decodeList<JsonObject>()
+
+        if (updatedRows.isEmpty()) {
+            Result.failure(Exception(NO_PERMISSION_MESSAGE))
+        } else {
+            runBestEffort("No se pudieron resolver las denuncias del reporte") {
+                resolveReportFlags(reportId)
+            }
+            runBestEffort("No se pudo registrar la acción EDIT") {
+                logModerationAction(
+                    reportId = reportId,
+                    action = ACTION_EDIT,
+                    reason = reason?.trim()?.takeIf { it.isNotBlank() }
+                )
+            }
+            Result.success(Unit)
+        }
+    } catch (error: CancellationException) {
+        throw error
+    } catch (error: RestException) {
+        Log.e(TAG, "RestException en updateReportAsModerator", error)
+        Result.failure(Exception(moderationRestMessage(error, "actualizar el reporte")))
+    } catch (error: HttpRequestException) {
+        Log.e(TAG, "HttpRequestException en updateReportAsModerator", error)
+        Result.failure(Exception("No hay conexión a internet. Verifica tu red e intenta de nuevo."))
+    } catch (error: Exception) {
+        Log.e(TAG, "Error inesperado en updateReportAsModerator", error)
+        Result.failure(Exception("No se pudo actualizar el reporte. Inténtalo de nuevo."))
+    }
+
+    override suspend fun getReportedPosts(): Result<List<ReportedPost>> = try {
+        // Un solo query con `reports(*)` embebido gracias a la FK
+        // report_flags.report_id -> reports.id (ON DELETE CASCADE).
+        val flags = supabaseClient
+            .from(REPORT_FLAGS_TABLE)
+            .select(Columns.raw(REPORT_FLAGS_WITH_REPORT_SELECT)) {
+                filter { eq("status", FLAG_STATUS_PENDING) }
+            }
+            .decodeList<ReportFlagRow>()
+
+        // Segunda consulta en bloque para los nombres, nunca una por denuncia.
+        val reporterNames = loadReporterNames(flags)
+
+        val reportedPosts = flags
+            .groupBy { it.reportId }
+            .mapNotNull { (reportId, reportFlags) ->
+                val latestFlag = reportFlags.maxByOrNull {
+                    parseCreatedAt(it.createdAt) ?: Instant.MIN
+                } ?: return@mapNotNull null
+
+                val report = reportFlags
+                    .firstNotNullOfOrNull { it.reports }
+                    ?.toDomain()
+                    ?: return@mapNotNull null
+
+                val normalizedReport = if (report.id.isNullOrBlank()) {
+                    report.copy(id = reportId)
+                } else {
+                    report
+                }
+
+                ReportedPost(
+                    report = normalizedReport,
+                    reporterCount = reportFlags.size,
+                    latestReason = reportReasonLabel(
+                        reason = latestFlag.reason,
+                        customReasonText = latestFlag.customReasonText
+                    ),
+                    latestReportedAt = latestFlag.createdAt,
+                    latestReporterName = latestFlag.reporterId
+                        ?.let { reporterNames[it] }
+                        ?.takeIf { it.isNotBlank() }
+                )
+            }
+            .sortedByDescending { parseCreatedAt(it.latestReportedAt) ?: Instant.MIN }
+
+        Result.success(reportedPosts)
+    } catch (error: CancellationException) {
+        throw error
+    } catch (error: RestException) {
+        Log.e(TAG, "RestException en getReportedPosts", error)
+        Result.failure(Exception(moderationRestMessage(error, "cargar las denuncias")))
+    } catch (error: HttpRequestException) {
+        Log.e(TAG, "HttpRequestException en getReportedPosts", error)
+        Result.failure(Exception("No hay conexión a internet. Verifica tu red e intenta de nuevo."))
+    } catch (error: Exception) {
+        Log.e(TAG, "Error inesperado en getReportedPosts", error)
+        Result.failure(Exception("No se pudieron cargar las denuncias. Inténtalo de nuevo."))
+    }
+
+    override suspend fun dismissReportFlags(reportId: String): Result<Unit> = try {
+        val updatedRows = updateFlagStatus(reportId, FLAG_STATUS_DISMISSED)
+
+        if (updatedRows.isEmpty()) {
+            Result.failure(Exception(NO_PERMISSION_MESSAGE))
+        } else {
+            runBestEffort("No se pudo registrar la acción DISMISS") {
+                logModerationAction(reportId, ACTION_DISMISS, null)
+            }
+            Result.success(Unit)
+        }
+    } catch (error: CancellationException) {
+        throw error
+    } catch (error: RestException) {
+        Log.e(TAG, "RestException en dismissReportFlags", error)
+        Result.failure(Exception(moderationRestMessage(error, "descartar las denuncias")))
+    } catch (error: HttpRequestException) {
+        Log.e(TAG, "HttpRequestException en dismissReportFlags", error)
+        Result.failure(Exception("No hay conexión a internet. Verifica tu red e intenta de nuevo."))
+    } catch (error: Exception) {
+        Log.e(TAG, "Error inesperado en dismissReportFlags", error)
+        Result.failure(Exception("No se pudieron descartar las denuncias. Inténtalo de nuevo."))
+    }
+
+    override suspend fun resolveReportFlags(reportId: String): Result<Unit> = try {
+        val updatedRows = updateFlagStatus(reportId, FLAG_STATUS_RESOLVED)
+
+        if (updatedRows.isEmpty()) {
+            Result.failure(Exception(NO_PERMISSION_MESSAGE))
+        } else {
+            Result.success(Unit)
+        }
+    } catch (error: CancellationException) {
+        throw error
+    } catch (error: RestException) {
+        Log.e(TAG, "RestException en resolveReportFlags", error)
+        Result.failure(Exception(moderationRestMessage(error, "resolver las denuncias")))
+    } catch (error: HttpRequestException) {
+        Log.e(TAG, "HttpRequestException en resolveReportFlags", error)
+        Result.failure(Exception("No hay conexión a internet. Verifica tu red e intenta de nuevo."))
+    } catch (error: Exception) {
+        Log.e(TAG, "Error inesperado en resolveReportFlags", error)
+        Result.failure(Exception("No se pudieron resolver las denuncias. Inténtalo de nuevo."))
+    }
+
+    override suspend fun logModerationAction(
+        reportId: String,
+        action: String,
+        reason: String?
+    ): Result<Unit> = try {
+        val normalizedAction = action.trim().uppercase(Locale.ROOT)
+        if (normalizedAction !in MODERATION_ACTIONS) {
+            return Result.failure(Exception("Acción de moderación no válida."))
+        }
+
+        val payload = buildJsonObject {
+            put("report_id", reportId)
+            put("action", normalizedAction)
+            reason?.trim()
+                ?.takeIf { it.isNotBlank() }
+                ?.let { put("reason", it) }
+        }
+
+        supabaseClient.from(MODERATION_LOGS_TABLE).insert(payload)
+        Result.success(Unit)
+    } catch (error: CancellationException) {
+        throw error
+    } catch (error: RestException) {
+        Log.e(TAG, "RestException en logModerationAction", error)
+        Result.failure(Exception(moderationRestMessage(error, "registrar la acción de moderación")))
+    } catch (error: HttpRequestException) {
+        Log.e(TAG, "HttpRequestException en logModerationAction", error)
+        Result.failure(Exception("No hay conexión a internet. Verifica tu red e intenta de nuevo."))
+    } catch (error: Exception) {
+        Log.e(TAG, "Error inesperado en logModerationAction", error)
+        Result.failure(Exception("No se pudo registrar la acción de moderación."))
+    }
+
+    private suspend fun updateFlagStatus(reportId: String, status: String): List<JsonObject> =
+        supabaseClient
+            .from(REPORT_FLAGS_TABLE)
+            .update(
+                body = buildJsonObject { put("status", status) },
+                request = {
+                    select(Columns.raw("id"))
+                    filter {
+                        eq("report_id", reportId)
+                        eq("status", FLAG_STATUS_PENDING)
+                    }
+                }
+            )
+            .decodeList<JsonObject>()
+
+    private suspend fun loadReporterNames(flags: List<ReportFlagRow>): Map<String, String?> {
+        val reporterIds = flags.mapNotNull { it.reporterId }.distinct()
+        if (reporterIds.isEmpty()) return emptyMap()
+
+        return try {
+            supabaseClient
+                .from(PROFILES_TABLE)
+                .select(Columns.raw("id,full_name")) {
+                    filter { isIn("id", reporterIds) }
+                }
+                .decodeList<ReporterProfileRow>()
+                .mapNotNull { row -> row.id?.let { id -> id to row.fullName } }
+                .toMap()
+        } catch (error: CancellationException) {
+            throw error
+        } catch (error: Exception) {
+            // El nombre es información secundaria: la tarjeta puede mostrarse
+            // con el alias "usuario" sin romper el panel.
+            Log.w(TAG, "No se pudieron cargar los nombres de los denunciantes", error)
+            emptyMap()
+        }
+    }
+
+    private suspend fun runBestEffort(
+        description: String,
+        action: suspend () -> Result<Unit>
+    ) {
+        try {
+            action().exceptionOrNull()?.let { error -> Log.w(TAG, description, error) }
+        } catch (error: CancellationException) {
+            throw error
+        } catch (error: Exception) {
+            Log.w(TAG, description, error)
+        }
+    }
+
+    private fun reportReasonLabel(reason: String?, customReasonText: String?): String {
+        val customReason = customReasonText?.trim().orEmpty()
+        if (customReason.isNotBlank()) return customReason
+
+        val normalizedReason = reason?.trim().orEmpty()
+        return ReportReason.entries
+            .firstOrNull { it.value.equals(normalizedReason, ignoreCase = true) }
+            ?.displayName
+            ?: normalizedReason.takeIf { it.isNotBlank() }
+            ?: "Motivo no especificado"
+    }
+
+    private fun moderationRestMessage(error: Throwable, action: String): String {
+        val message = error.message.orEmpty()
+        return when {
+            message.contains("row-level security", ignoreCase = true) ||
+                message.contains("permission denied", ignoreCase = true) ||
+                message.contains("violates row-level", ignoreCase = true) ->
+                NO_PERMISSION_MESSAGE
+
+            message.contains("does not exist", ignoreCase = true) ||
+                message.contains("could not find", ignoreCase = true) ||
+                message.contains("schema cache", ignoreCase = true) ->
+                "La función de moderación no está disponible. Verifica la configuración de Supabase."
+
+            else -> "No se pudo $action. Inténtalo de nuevo."
+        }
     }
 
     /**
@@ -525,6 +836,21 @@ class ReportRepositoryImpl @Inject constructor(
         private const val REPORTS_TABLE = "reports"
         private const val REPORTS_VIEW = "reports_view"
         private const val REPORT_FLAGS_TABLE = "report_flags"
+        private const val PROFILES_TABLE = "profiles"
+        private const val MODERATION_LOGS_TABLE = "moderation_logs"
+
+        private const val FLAG_STATUS_PENDING = "PENDING"
+        private const val FLAG_STATUS_DISMISSED = "DISMISSED"
+        private const val FLAG_STATUS_RESOLVED = "RESOLVED"
+
+        private const val ACTION_EDIT = "EDIT"
+        private const val ACTION_DELETE = "DELETE"
+        private const val ACTION_DISMISS = "DISMISS"
+
+        private val MODERATION_ACTIONS = setOf(ACTION_EDIT, ACTION_DELETE, ACTION_DISMISS)
+
+        private const val NO_PERMISSION_MESSAGE =
+            "No tienes permiso o el reporte ya no existe."
 
         /**
          * `profiles(...)` usa la relación PostgREST creada por la FK
@@ -532,5 +858,27 @@ class ReportRepositoryImpl @Inject constructor(
          */
         private const val REPORTS_WITH_PROFILE_SELECT =
             "*,profiles(full_name,avatar_url)"
+
+        /**
+         * `reports(*)` se resuelve con la FK
+         * `report_flags.report_id -> reports.id`, sin consultas N+1.
+         */
+        private const val REPORT_FLAGS_WITH_REPORT_SELECT = "*,reports(*)"
     }
 }
+
+@Serializable
+private data class ReportFlagRow(
+    @SerialName("report_id") val reportId: String,
+    @SerialName("reporter_id") val reporterId: String? = null,
+    @SerialName("reason") val reason: String? = null,
+    @SerialName("custom_reason_text") val customReasonText: String? = null,
+    @SerialName("created_at") val createdAt: String? = null,
+    @SerialName("reports") val reports: ReportDto? = null
+)
+
+@Serializable
+private data class ReporterProfileRow(
+    @SerialName("id") val id: String? = null,
+    @SerialName("full_name") val fullName: String? = null
+)
