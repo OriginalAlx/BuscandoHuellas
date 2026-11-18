@@ -21,6 +21,8 @@ import io.github.jan.supabase.storage.storage
 import io.ktor.client.plugins.HttpRequestTimeoutException
 import io.ktor.http.ContentType
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.flow
 import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.JsonObject
@@ -255,6 +257,44 @@ class ReportRepositoryImpl @Inject constructor(
     } catch (error: Exception) {
         Log.e(TAG, "Error inesperado en getAllReports", error)
         Result.failure(Exception(error.message ?: "No se pudieron cargar los reportes. Inténtalo de nuevo."))
+    }
+
+    /**
+     * Reportes del usuario autenticado, ordenados por `created_at` descendente.
+     *
+     * Reutiliza [selectReportDtos] (con el perfil del reportante embebido) y el
+     * mismo parseo de fechas que [getAllReports] para mantener la coherencia.
+     */
+    override fun getReportsByUser(userId: String): Flow<List<Report>> = flow {
+        if (userId.isBlank()) {
+            throw IllegalStateException("No se pudo identificar al usuario autenticado.")
+        }
+
+        Log.d(TAG, "🔍 Consultando reportes del usuario $userId...")
+
+        val reports = try {
+            selectReportDtos(userId = userId)
+                .map { dto -> dto.toDomain() }
+                .map { report -> report to (parseCreatedAt(report.createdAt) ?: Instant.MIN) }
+                .sortedByDescending { it.second }
+                .map { it.first }
+        } catch (error: CancellationException) {
+            throw error
+        } catch (error: HttpRequestException) {
+            Log.e(TAG, "HttpRequestException en getReportsByUser", error)
+            throw Exception("No hay conexión a internet. Verifica tu red e intenta de nuevo.")
+        } catch (error: RestException) {
+            Log.e(TAG, "RestException en getReportsByUser", error)
+            throw Exception(friendlyMessage(error))
+        } catch (error: Exception) {
+            Log.e(TAG, "Error inesperado en getReportsByUser", error)
+            throw Exception(
+                error.message ?: "No se pudieron cargar tus reportes. Inténtalo de nuevo."
+            )
+        }
+
+        Log.d(TAG, "Reportes del usuario $userId: ${reports.size}")
+        emit(reports)
     }
 
     override suspend fun getReportById(reportId: String): Result<Report> = try {
@@ -763,13 +803,19 @@ class ReportRepositoryImpl @Inject constructor(
      * Si la relación todavía no existe (por ejemplo, la migración SQL no se
      * aplicó), se reintenta contra `reports_view` para no romper la pantalla.
      */
-    private suspend fun selectReportDtos(reportId: String? = null): List<ReportDto> {
+    private suspend fun selectReportDtos(
+        reportId: String? = null,
+        userId: String? = null
+    ): List<ReportDto> {
         return try {
             supabaseClient
                 .from(REPORTS_TABLE)
                 .select(Columns.raw(REPORTS_WITH_PROFILE_SELECT)) {
                     if (reportId != null) {
                         filter { eq("id", reportId) }
+                    }
+                    if (userId != null) {
+                        filter { eq("user_id", userId) }
                     }
                 }
                 .decodeList<ReportDto>()
@@ -790,6 +836,9 @@ class ReportRepositoryImpl @Inject constructor(
                 .select {
                     if (reportId != null) {
                         filter { eq("id", reportId) }
+                    }
+                    if (userId != null) {
+                        filter { eq("user_id", userId) }
                     }
                 }
                 .decodeList<ReportDto>()

@@ -37,6 +37,7 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.hilt.lifecycle.viewmodel.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import com.app.buscandohuellas.ui.theme.BrandColors
 import com.app.buscandohuellas.ui.theme.ModeratorColors
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -245,7 +246,7 @@ private fun TabTitle(
             badge = {
                 Badge(
                     containerColor = ModeratorColors.Red,
-                    contentColor = Color.White
+                    contentColor = BrandColors.OnPrimary
                 ) {
                     Text(
                         text = moderationCountLabel(reportedCount),

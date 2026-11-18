@@ -1,6 +1,7 @@
 package com.app.buscandohuellas.ui.screens.reportDetail
 
 import android.Manifest
+import android.content.ActivityNotFoundException
 import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageManager
@@ -8,6 +9,7 @@ import android.content.res.Resources
 import android.graphics.Canvas
 import android.graphics.Paint
 import android.graphics.drawable.Drawable
+import android.widget.Toast
 import androidx.compose.animation.animateColorAsState
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
@@ -51,6 +53,7 @@ import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.Flag
 import androidx.compose.material.icons.filled.ImageNotSupported
 import androidx.compose.material.icons.filled.LocationOn
+import androidx.compose.material.icons.filled.Navigation
 import androidx.compose.material.icons.filled.Pets
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Share
@@ -114,6 +117,7 @@ import androidx.compose.ui.window.DialogProperties
 import androidx.core.content.ContextCompat
 import androidx.core.graphics.createBitmap
 import androidx.core.graphics.drawable.toDrawable
+import androidx.core.net.toUri
 import androidx.hilt.lifecycle.viewmodel.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import coil.compose.AsyncImage
@@ -123,6 +127,8 @@ import com.app.buscandohuellas.domain.model.ReportStatus
 import com.app.buscandohuellas.ui.components.ReportReasonBottomSheet
 import com.app.buscandohuellas.ui.components.StatusBadge
 import com.app.buscandohuellas.ui.theme.BrandColors
+import com.app.buscandohuellas.ui.theme.backgroundColor
+import com.app.buscandohuellas.ui.theme.textColor
 import kotlinx.coroutines.launch
 import org.osmdroid.config.Configuration
 import org.osmdroid.tileprovider.tilesource.TileSourceFactory
@@ -139,6 +145,12 @@ private const val MAX_ZOOM = 5f
 fun ReportDetailScreen(
     onNavigateBack: () -> Unit,
     onEditClick: () -> Unit = {},
+    onContactClick: (
+        ownerId: String,
+        ownerName: String,
+        ownerAvatarUrl: String?,
+        reportId: String?
+    ) -> Unit = { _, _, _, _ -> },
     refreshSignal: Int = 0,
     viewModel: ReportDetailViewModel = hiltViewModel()
 ) {
@@ -269,7 +281,17 @@ fun ReportDetailScreen(
                 onExpandPhoto = { page -> fullScreenStartPage = page },
                 onStatusClick = viewModel::openStatusSelector,
                 onContactClick = {
-                    showMessage("El canal de contacto con el dueño estará disponible pronto.")
+                    val ownerId = state.report.userId
+                    if (ownerId.isBlank()) {
+                        showMessage("No se pudo identificar al dueño del reporte.")
+                    } else {
+                        onContactClick(
+                            ownerId,
+                            state.userName,
+                            state.userAvatarUrl,
+                            state.report.id
+                        )
+                    }
                 },
                 onEditClick = onEditClick,
                 onReportClick = viewModel::openReportSheet,
@@ -470,6 +492,13 @@ private fun DetailContent(
                     longitude = report.longitude
                 )
 
+                Spacer(modifier = Modifier.height(12.dp))
+
+                DirectionsButton(
+                    latitude = report.latitude,
+                    longitude = report.longitude
+                )
+
                 Spacer(modifier = Modifier.height(20.dp))
 
                 Button(
@@ -480,7 +509,7 @@ private fun DetailContent(
                     shape = RoundedCornerShape(50),
                     colors = ButtonDefaults.buttonColors(
                         containerColor = BrandColors.Primary,
-                        contentColor = Color.White
+                        contentColor = BrandColors.OnPrimary
                     )
                 ) {
                     Icon(
@@ -795,12 +824,14 @@ private fun LocationCard(
                 )
             }
 
-            if (latitude != null && longitude != null) {
+            val lat = latitude
+            val lng = longitude
+            if (lat != null && lng != null && hasValidCoordinates(lat, lng)) {
                 Spacer(modifier = Modifier.height(14.dp))
 
                 ReportMiniMap(
-                    latitude = latitude,
-                    longitude = longitude,
+                    latitude = lat,
+                    longitude = lng,
                     modifier = Modifier
                         .fillMaxWidth()
                         .height(200.dp)
@@ -808,6 +839,84 @@ private fun LocationCard(
                 )
             }
         }
+    }
+}
+
+/**
+ * Indica si el reporte tiene coordenadas utilizables. Se descarta `null` y el
+ * par (0.0, 0.0), que suele representar una ubicación desconocida.
+ */
+private fun hasValidCoordinates(latitude: Double?, longitude: Double?): Boolean =
+    latitude != null &&
+        longitude != null &&
+        !(latitude == 0.0 && longitude == 0.0) &&
+        latitude in -90.0..90.0 &&
+        longitude in -180.0..180.0
+
+/**
+ * Botón que abre la aplicación de mapas del dispositivo con la ubicación exacta
+ * del reporte. Se deshabilita cuando el reporte no tiene coordenadas válidas.
+ */
+@Composable
+private fun DirectionsButton(
+    latitude: Double?,
+    longitude: Double?
+) {
+    val context = LocalContext.current
+
+    val coordinatesAvailable = hasValidCoordinates(latitude, longitude)
+
+    Button(
+        onClick = {
+            val lat = latitude
+            val lng = longitude
+            if (lat != null && lng != null) {
+                // El parámetro q coloca un pin exacto en la mayoría de apps.
+                val uri = "geo:$lat,$lng?q=$lat,$lng".toUri()
+                val intent = Intent(Intent.ACTION_VIEW, uri)
+
+                try {
+                    context.startActivity(intent)
+                } catch (error: ActivityNotFoundException) {
+                    Toast.makeText(
+                        context,
+                        "No se encontró ninguna aplicación de mapas instalada",
+                        Toast.LENGTH_LONG
+                    ).show()
+                }
+            }
+        },
+        enabled = coordinatesAvailable,
+        modifier = Modifier
+            .fillMaxWidth()
+            .height(48.dp),
+        shape = RoundedCornerShape(50),
+        colors = ButtonDefaults.buttonColors(
+            containerColor = BrandColors.Primary,
+            contentColor = BrandColors.OnPrimary,
+            disabledContainerColor = BrandColors.Divider,
+            disabledContentColor = BrandColors.TextSecondary
+        ),
+        elevation = ButtonDefaults.buttonElevation(
+            defaultElevation = 3.dp,
+            pressedElevation = 1.dp,
+            disabledElevation = 0.dp
+        ),
+        contentPadding = PaddingValues(horizontal = 20.dp)
+    ) {
+        Icon(
+            imageVector = Icons.Filled.Navigation,
+            contentDescription = null,
+            modifier = Modifier.size(20.dp)
+        )
+
+        Spacer(modifier = Modifier.width(8.dp))
+
+        Text(
+            text = if (coordinatesAvailable) "Cómo llegar" else "Ubicación no disponible",
+            fontSize = 16.sp,
+            fontWeight = FontWeight.Bold
+        )
     }
 }
 
@@ -1021,7 +1130,7 @@ private fun CommentInput(
                 modifier = Modifier.size(48.dp),
                 colors = IconButtonDefaults.filledIconButtonColors(
                     containerColor = BrandColors.Primary,
-                    contentColor = Color.White,
+                    contentColor = BrandColors.OnPrimary,
                     disabledContainerColor = BrandColors.PrimaryLight,
                     disabledContentColor = BrandColors.TextSecondary
                 )

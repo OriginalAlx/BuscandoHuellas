@@ -74,6 +74,8 @@ import coil.compose.AsyncImage
 import coil.request.ImageRequest
 import com.app.buscandohuellas.domain.model.ReportStatus
 import com.app.buscandohuellas.ui.theme.BrandColors
+import com.app.buscandohuellas.ui.theme.backgroundColor
+import com.app.buscandohuellas.ui.theme.textColor
 
 @OptIn(ExperimentalMaterial3Api::class, ExperimentalLayoutApi::class)
 @Composable
@@ -336,7 +338,7 @@ private fun EditReportContent(
             shape = RoundedCornerShape(50),
             colors = ButtonDefaults.buttonColors(
                 containerColor = BrandColors.Primary,
-                contentColor = Color.White,
+                contentColor = BrandColors.OnPrimary,
                 disabledContainerColor = BrandColors.PrimaryLight,
                 disabledContentColor = BrandColors.TextSecondary
             )
@@ -344,7 +346,7 @@ private fun EditReportContent(
             if (isSaving) {
                 CircularProgressIndicator(
                     modifier = Modifier.size(20.dp),
-                    color = Color.White,
+                    color = BrandColors.OnPrimary,
                     strokeWidth = 2.dp
                 )
                 Spacer(modifier = Modifier.width(8.dp))

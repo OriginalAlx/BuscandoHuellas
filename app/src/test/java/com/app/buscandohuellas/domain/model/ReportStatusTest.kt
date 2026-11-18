@@ -35,15 +35,21 @@ class ReportStatusTest {
     }
 
     @Test
-    fun exposesComposeColors() {
-        assertEquals(Color(0xFFDC2626), ReportStatus.LOST.textColor)
-        assertEquals(Color(0xFFFEE2E2), ReportStatus.LOST.backgroundColor)
+    fun exposesComposeColorsForBothThemes() {
+        assertEquals(Color(0xFFDC2626), ReportStatus.LOST.lightTextColor)
+        assertEquals(Color(0xFFFEE2E2), ReportStatus.LOST.lightBackgroundColor)
+        assertEquals(Color(0xFFF87171), ReportStatus.LOST.darkTextColor)
+        assertEquals(Color(0xFF4A1D1D), ReportStatus.LOST.darkBackgroundColor)
 
-        assertEquals(Color(0xFFEA580C), ReportStatus.SIGHTED.textColor)
-        assertEquals(Color(0xFFFFEDD5), ReportStatus.SIGHTED.backgroundColor)
+        assertEquals(Color(0xFFEA580C), ReportStatus.SIGHTED.lightTextColor)
+        assertEquals(Color(0xFFFFEDD5), ReportStatus.SIGHTED.lightBackgroundColor)
+        assertEquals(Color(0xFFFB923C), ReportStatus.SIGHTED.darkTextColor)
+        assertEquals(Color(0xFF4A2A12), ReportStatus.SIGHTED.darkBackgroundColor)
 
-        assertEquals(Color(0xFF059669), ReportStatus.FOUND.textColor)
-        assertEquals(Color(0xFFD1FAE5), ReportStatus.FOUND.backgroundColor)
+        assertEquals(Color(0xFF059669), ReportStatus.FOUND.lightTextColor)
+        assertEquals(Color(0xFFD1FAE5), ReportStatus.FOUND.lightBackgroundColor)
+        assertEquals(Color(0xFF34D399), ReportStatus.FOUND.darkTextColor)
+        assertEquals(Color(0xFF123B2C), ReportStatus.FOUND.darkBackgroundColor)
     }
 
     @Test

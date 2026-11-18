@@ -6,6 +6,7 @@ import com.app.buscandohuellas.domain.model.ReportImageUploadResult
 import com.app.buscandohuellas.domain.model.ReportReason
 import com.app.buscandohuellas.domain.model.ReportStatus
 import com.app.buscandohuellas.domain.model.ReportedPost
+import kotlinx.coroutines.flow.Flow
 
 interface ReportRepository {
 
@@ -16,6 +17,14 @@ interface ReportRepository {
     suspend fun deleteReportImage(imageUrl: String): Result<Unit>
 
     suspend fun getAllReports(): Result<List<Report>>
+
+    /**
+     * Emite los reportes creados por [userId], el más reciente primero.
+     *
+     * Es un Flow frío: cada colección vuelve a consultar Supabase, lo que
+     * permite al ViewModel recargar la lista de forma sencilla y cancelable.
+     */
+    fun getReportsByUser(userId: String): Flow<List<Report>>
 
     suspend fun getReportById(reportId: String): Result<Report>
 

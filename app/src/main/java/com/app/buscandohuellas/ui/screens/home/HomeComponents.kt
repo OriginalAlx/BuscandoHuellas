@@ -94,6 +94,7 @@ enum class ProfileMenuItem(
     val isDestructive: Boolean = false
 ) {
     MY_REPORTS("Mis reportes", Icons.Filled.Pets),
+    NOTIFICATIONS("Notificaciones", Icons.Filled.Notifications),
     SETTINGS("Configuración", Icons.Filled.Settings),
     LOGOUT("Cerrar sesión", Icons.AutoMirrored.Filled.ExitToApp, isDestructive = true)
 }
@@ -131,8 +132,10 @@ data class AlertItemUi(
 
 
 data class UserProfileUi(
+    val userId: String = "",
     val fullName: String = "",
     val email: String = "",
+    val avatarUrl: String? = null,
     val reportsCount: Int = 0,
     val contributionsCount: Int = 0,
     val reunionsCount: Int = 0
@@ -253,7 +256,8 @@ fun UserAvatar(
     modifier: Modifier = Modifier,
     onClick: (() -> Unit)? = null,
     borderWidth: Dp = 0.dp,
-    borderColor: Color = BrandColors.Surface
+    borderColor: Color = BrandColors.Surface,
+    imageUrl: String? = null
 ) {
     Box(
         modifier = modifier
@@ -264,13 +268,29 @@ fun UserAvatar(
             .then(if (onClick != null) Modifier.clickable(onClick = onClick) else Modifier),
         contentAlignment = Alignment.Center
     ) {
-        Text(
-            text = initials,
-            color = Color.White,
-            fontWeight = FontWeight.Bold,
-            fontSize = (size.value / 2.6f).sp
-        )
-        
+        if (imageUrl.isNullOrBlank()) {
+            Text(
+                text = initials,
+                color = BrandColors.OnPrimary,
+                fontWeight = FontWeight.Bold,
+                fontSize = (size.value / 2.6f).sp
+            )
+        } else {
+            // La foto se recorta en círculo; si falla la carga, el fondo lavanda
+            // y las iniciales siguen visibles debajo.
+            Text(
+                text = initials,
+                color = BrandColors.OnPrimary,
+                fontWeight = FontWeight.Bold,
+                fontSize = (size.value / 2.6f).sp
+            )
+            AsyncImage(
+                model = imageUrl,
+                contentDescription = "Foto de perfil",
+                contentScale = ContentScale.Crop,
+                modifier = Modifier.fillMaxSize()
+            )
+        }
     }
 }
 
@@ -589,7 +609,7 @@ fun AlertFilterChip(
         Text(
             text = label,
             style = MaterialTheme.typography.labelLarge,
-            color = if (selected) Color.White else BrandColors.TextSecondary
+            color = if (selected) BrandColors.OnPrimary else BrandColors.TextSecondary
         )
     }
 }
@@ -743,7 +763,7 @@ fun MapReportFab(onClick: () -> Unit, modifier: Modifier = Modifier) {
         onClick = onClick,
         modifier = modifier,
         containerColor = BrandColors.Accent,
-        contentColor = Color.White,
+        contentColor = BrandColors.OnPrimary,
         shape = RoundedCornerShape(16.dp),
         elevation = FloatingActionButtonDefaults.elevation(defaultElevation = 4.dp)
     ) {
@@ -936,7 +956,7 @@ fun AppBottomNavigationBar(
                             if (item.tab == HomeTab.ALERTS && unreadAlerts > 0) {
                                 Badge(
                                     containerColor = BrandColors.Accent,
-                                    contentColor = Color.White
+                                    contentColor = BrandColors.OnPrimary
                                 ) {
                                     Text(text = unreadAlerts.toString(), fontWeight = FontWeight.Bold)
                                 }
@@ -1035,7 +1055,7 @@ fun ReportMarkerPanel(
             shape = RoundedCornerShape(12.dp),
             colors = ButtonDefaults.buttonColors(
                 containerColor = BrandColors.Primary,
-                contentColor = Color.White
+                contentColor = BrandColors.OnPrimary
             )
         ) {
             Text(

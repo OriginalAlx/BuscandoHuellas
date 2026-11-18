@@ -15,6 +15,8 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.app.buscandohuellas.domain.model.ReportStatus
+import com.app.buscandohuellas.ui.theme.backgroundColor
+import com.app.buscandohuellas.ui.theme.textColor
 
 /**
  * Badge compartido para los tres estados de un reporte.

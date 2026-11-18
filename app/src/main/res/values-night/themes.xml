@@ -1,0 +1,18 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+
+    <!--
+      Variante nocturna del tema base. Se aplica cuando el sistema está en
+      modo oscuro; si el usuario fuerza el modo desde Configuración,
+      MainActivity actualiza el fondo de la ventana y las barras sin recrear
+      la Activity.
+    -->
+    <style name="Theme.BuscandoHuellas" parent="android:Theme.Material.NoActionBar">
+        <item name="android:windowBackground">@color/brand_background</item>
+        <item name="android:colorBackground">@color/brand_background</item>
+        <item name="android:statusBarColor">@android:color/transparent</item>
+        <item name="android:navigationBarColor">@android:color/transparent</item>
+        <item name="android:windowLightStatusBar">false</item>
+        <item name="android:windowActionModeOverlay">true</item>
+    </style>
+</resources>

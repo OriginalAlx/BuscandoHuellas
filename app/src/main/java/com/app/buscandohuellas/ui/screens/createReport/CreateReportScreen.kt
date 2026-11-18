@@ -76,6 +76,8 @@ import coil.compose.AsyncImage
 import coil.request.ImageRequest
 import com.app.buscandohuellas.domain.model.ReportStatus
 import com.app.buscandohuellas.ui.theme.BrandColors
+import com.app.buscandohuellas.ui.theme.backgroundColor
+import com.app.buscandohuellas.ui.theme.textColor
 import java.util.Locale
 
 @OptIn(ExperimentalMaterial3Api::class)

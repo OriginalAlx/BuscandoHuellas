@@ -40,6 +40,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import com.app.buscandohuellas.domain.model.Report
+import com.app.buscandohuellas.ui.theme.BrandColors
 import com.app.buscandohuellas.ui.theme.ModeratorColors
 
 @Composable
@@ -150,7 +151,7 @@ private fun ReportFilterChips(
                     text = option.label,
                     style = MaterialTheme.typography.labelLarge,
                     fontWeight = FontWeight.Medium,
-                    color = if (selected) Color.White else ModeratorColors.ChipText
+                    color = if (selected) BrandColors.OnPrimary else ModeratorColors.ChipText
                 )
             }
         }
@@ -338,7 +339,7 @@ internal fun LoadErrorState(
             shape = RoundedCornerShape(50),
             colors = ButtonDefaults.buttonColors(
                 containerColor = ModeratorColors.Lavender,
-                contentColor = Color.White
+                contentColor = BrandColors.OnPrimary
             )
         ) {
             Icon(

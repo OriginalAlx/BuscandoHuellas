@@ -69,7 +69,10 @@ import com.app.buscandohuellas.domain.model.Report
 import com.app.buscandohuellas.domain.model.ReportStatus
 import com.app.buscandohuellas.domain.model.ReportedPost
 import com.app.buscandohuellas.ui.components.StatusBadge
+import com.app.buscandohuellas.ui.theme.BrandColors
 import com.app.buscandohuellas.ui.theme.ModeratorColors
+import com.app.buscandohuellas.ui.theme.backgroundColor
+import com.app.buscandohuellas.ui.theme.textColor
 import java.time.Duration
 import java.time.Instant
 import java.time.LocalDateTime
@@ -198,7 +201,7 @@ internal fun CountBadge(count: Int, modifier: Modifier = Modifier) {
             text = moderationCountLabel(count),
             style = MaterialTheme.typography.labelSmall,
             fontWeight = FontWeight.Bold,
-            color = Color.White
+            color = BrandColors.OnPrimary
         )
     }
 }
@@ -716,7 +719,7 @@ internal fun ModeratorEditSheet(
                         .height(48.dp),
                     colors = ButtonDefaults.buttonColors(
                         containerColor = ModeratorColors.Lavender,
-                        contentColor = Color.White
+                        contentColor = BrandColors.OnPrimary
                     )
                 ) {
                     if (isActionLoading) {

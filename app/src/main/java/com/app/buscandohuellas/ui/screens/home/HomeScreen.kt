@@ -26,6 +26,7 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
@@ -96,9 +97,16 @@ import org.osmdroid.views.overlay.mylocation.MyLocationNewOverlay
 @Composable
 fun HomeScreen(
     onNavigateToCreateReport: () -> Unit,
+    selectedTab: HomeTab = HomeTab.HOME,
+    onTabSelected: (HomeTab) -> Unit = {},
     onReportClick: (String) -> Unit = {},
     onProfileClick: () -> Unit = {},
+    onMyReportsClick: (String) -> Unit = {},
+    onEditProfileClick: (String) -> Unit = {},
+    onNotificationsSettingsClick: () -> Unit = {},
+    onSettingsClick: () -> Unit = {},
     onLogout: () -> Unit = {},
+    refreshSignal: Int = 0,
     viewModel: HomeViewModel = hiltViewModel()
 ) {
     val uiState by viewModel.uiState.collectAsStateWithLifecycle()
@@ -110,6 +118,32 @@ fun HomeScreen(
     val userLocation by viewModel.userLocation.collectAsStateWithLifecycle()
     val hasLocationPermission by viewModel.hasLocationPermission.collectAsStateWithLifecycle()
     val showPermissionDeniedDialog by viewModel.showPermissionDeniedDialog.collectAsStateWithLifecycle()
+    val isLoggedOut by viewModel.isLoggedOut.collectAsStateWithLifecycle()
+
+    // La ruta es la fuente de verdad de la pestaña activa: al volver de otra
+    // ruta (o al restaurar estado) se sincroniza el ViewModel.
+    LaunchedEffect(selectedTab) {
+        viewModel.onTabSelected(selectedTab)
+    }
+
+    // Cambiar de pestaña actualiza la UI de inmediato y navega a su ruta para
+    // que la barra inferior y el backstack queden sincronizados.
+    val selectTab: (HomeTab) -> Unit = { tab ->
+        viewModel.onTabSelected(tab)
+        onTabSelected(tab)
+    }
+
+    var showLogoutDialog by remember { mutableStateOf(false) }
+
+    LaunchedEffect(isLoggedOut) {
+        if (isLoggedOut) onLogout()
+    }
+
+    // Se recarga el perfil cuando se vuelve de "Editar perfil" para reflejar
+    // el nombre y el avatar guardados.
+    LaunchedEffect(refreshSignal) {
+        if (refreshSignal > 0) viewModel.loadCurrentUser()
+    }
 
     val context = LocalContext.current
 
@@ -148,26 +182,23 @@ fun HomeScreen(
     Scaffold(
         topBar = {
             HomeTopBar(
-                selectedTab = uiState.selectedTab,
+                selectedTab = selectedTab,
                 unreadAlerts = uiState.unreadAlertsCount,
                 initials = uiState.profile.initials,
-                onNotificationsClick = { viewModel.onTabSelected(HomeTab.ALERTS) },
+                avatarUrl = uiState.profile.avatarUrl,
+                onNotificationsClick = { selectTab(HomeTab.ALERTS) },
                 onProfileClick = onProfileClick
             )
         },
-        bottomBar = {
-            AppBottomNavigationBar(
-                selectedTab = uiState.selectedTab,
-                unreadAlerts = uiState.unreadAlertsCount,
-                onTabSelected = viewModel::onTabSelected
-            )
-        },
         floatingActionButton = {
-            if (uiState.selectedTab == HomeTab.MAP) {
+            if (selectedTab == HomeTab.MAP) {
                 MapReportFab(onClick = onNavigateToCreateReport)
             }
         },
         floatingActionButtonPosition = FabPosition.Center,
+        // La barra inferior vive en AppNavHost; aquí no se consume el inset
+        // inferior para no duplicar el espacio reservado.
+        contentWindowInsets = WindowInsets(0, 0, 0, 0),
         containerColor = ComposeColor.Transparent
     ) { paddingValues ->
         Box(
@@ -180,15 +211,15 @@ fun HomeScreen(
                 )
                 .padding(paddingValues)
         ) {
-            when (uiState.selectedTab) {
+            when (selectedTab) {
                 HomeTab.HOME -> HomeContent(
                     state = uiState,
                     userLocation = userLocation,
                     isRefreshing = isRefreshing,
                     onRefresh = viewModel::refreshReports,
                     onReportClick = onReportClick,
-                    onAlertsBannerClick = { viewModel.onTabSelected(HomeTab.ALERTS) },
-                    onSeeAllReportsClick = { viewModel.onTabSelected(HomeTab.MAP) }
+                    onAlertsBannerClick = { selectTab(HomeTab.ALERTS) },
+                    onSeeAllReportsClick = { selectTab(HomeTab.MAP) }
                 )
 
                 HomeTab.MAP -> MapContent(
@@ -211,9 +242,17 @@ fun HomeScreen(
 
                 HomeTab.PROFILE -> ProfileContent(
                     profile = uiState.profile,
-                    onEditProfileClick = onProfileClick,
+                    onEditProfileClick = { onEditProfileClick(uiState.profile.userId) },
                     onMenuItemClick = { menuItem ->
-                        if (menuItem == ProfileMenuItem.LOGOUT) onLogout()
+                        when (menuItem) {
+                            ProfileMenuItem.MY_REPORTS -> {
+                                onMyReportsClick(uiState.profile.userId)
+                            }
+
+                            ProfileMenuItem.NOTIFICATIONS -> onNotificationsSettingsClick()
+                            ProfileMenuItem.SETTINGS -> onSettingsClick()
+                            ProfileMenuItem.LOGOUT -> showLogoutDialog = true
+                        }
                     }
                 )
             }
@@ -251,6 +290,47 @@ fun HomeScreen(
             }
         )
     }
+
+    if (showLogoutDialog) {
+        AlertDialog(
+            onDismissRequest = { showLogoutDialog = false },
+            title = {
+                Text(
+                    text = "Cerrar sesión",
+                    fontWeight = FontWeight.Bold,
+                    color = BrandColors.TextPrimary
+                )
+            },
+            text = {
+                Text(
+                    text = "¿Seguro que quieres cerrar sesión? Tendrás que iniciar " +
+                            "sesión de nuevo para ver tus reportes.",
+                    color = BrandColors.TextSecondary
+                )
+            },
+            confirmButton = {
+                TextButton(
+                    onClick = {
+                        showLogoutDialog = false
+                        // HomeViewModel elimina el token FCM y cierra la sesión
+                        // de Supabase; al terminar, onLogout navega al login.
+                        viewModel.logout()
+                    }
+                ) {
+                    Text(
+                        text = "Cerrar sesión",
+                        color = BrandColors.Accent,
+                        fontWeight = FontWeight.Bold
+                    )
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { showLogoutDialog = false }) {
+                    Text("Cancelar", color = BrandColors.TextSecondary)
+                }
+            }
+        )
+    }
 }
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -259,6 +339,7 @@ private fun HomeTopBar(
     selectedTab: HomeTab,
     unreadAlerts: Int,
     initials: String,
+    avatarUrl: String?,
     onNotificationsClick: () -> Unit,
     onProfileClick: () -> Unit
 ) {
@@ -306,7 +387,8 @@ private fun HomeTopBar(
             UserAvatar(
                 initials = initials,
                 size = 36.dp,
-                onClick = onProfileClick
+                onClick = onProfileClick,
+                imageUrl = avatarUrl
             )
         },
         colors = TopAppBarDefaults.topAppBarColors(containerColor = ComposeColor.Transparent)
@@ -831,7 +913,8 @@ private fun ProfileHeader(profile: UserProfileUi, onEditProfileClick: () -> Unit
             initials = profile.initials,
             size = 96.dp,
             borderWidth = 4.dp,
-            borderColor = BrandColors.Surface
+            borderColor = BrandColors.Surface,
+            imageUrl = profile.avatarUrl
         )
 
         Spacer(modifier = Modifier.height(16.dp))

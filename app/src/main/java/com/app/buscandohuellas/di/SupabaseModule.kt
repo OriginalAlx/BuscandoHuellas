@@ -3,6 +3,7 @@ package com.app.buscandohuellas.di
 import com.app.buscandohuellas.SupabaseClient as SupabaseAppClient
 import com.app.buscandohuellas.data.repository.AuthRepositoryImpl
 import com.app.buscandohuellas.domain.repository.AuthRepository
+import com.app.buscandohuellas.util.FirebaseTokenManager
 import dagger.Module
 import dagger.Provides
 import dagger.hilt.InstallIn
@@ -20,5 +21,8 @@ object SupabaseModule {
 
     @Provides
     @Singleton
-    fun provideAuthRepository(client: SupabaseClient): AuthRepository = AuthRepositoryImpl(client)
+    fun provideAuthRepository(
+        client: SupabaseClient,
+        firebaseTokenManager: FirebaseTokenManager
+    ): AuthRepository = AuthRepositoryImpl(client, firebaseTokenManager)
 }

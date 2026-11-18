@@ -7,4 +7,10 @@
     <color name="teal_700">#FF018786</color>
     <color name="black">#FF000000</color>
     <color name="white">#FFFFFFFF</color>
+    <!-- Color primario de marca (lavanda), usado por FCM como color por defecto. -->
+    <color name="brand_primary">#FF6C4BE0</color>
+    <!-- Fondo de ventana equivalente a LightBrandPalette.background. -->
+    <color name="brand_background">#FFF7F6FC</color>
+    <!-- Superficie base equivalente a LightBrandPalette.surface. -->
+    <color name="brand_surface">#FFFFFFFF</color>
 </resources>

@@ -12,12 +12,14 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.app.buscandohuellas.domain.model.Report
 import com.app.buscandohuellas.domain.repository.AuthRepository
+import com.app.buscandohuellas.domain.repository.ProfileRepository
 import com.app.buscandohuellas.domain.repository.ReportRepository
 import com.google.android.gms.location.CurrentLocationRequest
 import com.google.android.gms.location.FusedLocationProviderClient
 import com.google.android.gms.location.LocationServices
 import com.google.android.gms.location.Priority
 import dagger.hilt.android.lifecycle.HiltViewModel
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -29,7 +31,8 @@ import javax.inject.Inject
 @HiltViewModel
 class HomeViewModel @Inject constructor(
     private val authRepository: AuthRepository,
-    private val reportRepository: ReportRepository
+    private val reportRepository: ReportRepository,
+    private val profileRepository: ProfileRepository
 ) : ViewModel() {
 
     private val _uiState = MutableStateFlow(HomeUiState())
@@ -58,6 +61,10 @@ class HomeViewModel @Inject constructor(
 
     private val _showPermissionDeniedDialog = MutableStateFlow(false)
     val showPermissionDeniedDialog: StateFlow<Boolean> = _showPermissionDeniedDialog.asStateFlow()
+
+    /** Emite true cuando el logout terminó (token FCM eliminado + sesión cerrada). */
+    private val _isLoggedOut = MutableStateFlow(false)
+    val isLoggedOut: StateFlow<Boolean> = _isLoggedOut.asStateFlow()
 
     val reportsForMap: StateFlow<List<Report>> get() = _reports
     val isLoadingMap: StateFlow<Boolean> get() = _isLoading
@@ -223,14 +230,30 @@ class HomeViewModel @Inject constructor(
         )
     }
 
-    private fun loadCurrentUser() {
+    /**
+     * Carga el usuario autenticado y completa nombre, email y avatar.
+     *
+     * El avatar solo vive en `profiles`, así que se consulta el repositorio de
+     * perfil; si falla, se conservan los datos de la sesión de Auth.
+     */
+    fun loadCurrentUser() {
         viewModelScope.launch {
             val user = authRepository.getCurrentUser()
+            val profile = user?.id
+                ?.takeIf { it.isNotBlank() }
+                ?.let { userId ->
+                    profileRepository.getProfile(userId).getOrNull()
+                }
+
             _uiState.update { current ->
                 current.copy(
                     profile = current.profile.copy(
-                        fullName = user?.fullName.orEmpty(),
-                        email = user?.email.orEmpty()
+                        userId = user?.id.orEmpty(),
+                        fullName = profile?.fullName?.takeIf { it.isNotBlank() }
+                            ?: user?.fullName.orEmpty(),
+                        email = profile?.email?.takeIf { it.isNotBlank() }
+                            ?: user?.email.orEmpty(),
+                        avatarUrl = profile?.avatarUrl?.takeIf { it.isNotBlank() }
                     )
                 )
             }
@@ -262,6 +285,24 @@ class HomeViewModel @Inject constructor(
     }
 
     fun onCreateReportClicked() = Unit
+
+    /**
+     * Cierra la sesión en Supabase. [AuthRepositoryImpl.logout] elimina antes
+     * el token FCM del servidor para que este dispositivo deje de recibir push.
+     */
+    fun logout() {
+        viewModelScope.launch {
+            try {
+                authRepository.logout()
+                Log.e("BH_DEBUG", "✅ HomeViewModel: logout completado")
+                _isLoggedOut.value = true
+            } catch (error: CancellationException) {
+                throw error
+            } catch (error: Exception) {
+                Log.e("BH_DEBUG", "❌ HomeViewModel: error al cerrar sesión", error)
+            }
+        }
+    }
 
     fun refreshReports() {
         viewModelScope.launch {
