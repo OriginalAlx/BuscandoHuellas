@@ -6,6 +6,7 @@ import android.graphics.Bitmap
 import android.net.Uri
 import android.util.Log
 import androidx.core.content.FileProvider
+import androidx.lifecycle.SavedStateHandle
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.app.buscandohuellas.domain.model.Report
@@ -27,15 +28,27 @@ import javax.inject.Inject
 sealed interface CreateReportUiState {
     data object Idle : CreateReportUiState
     data object Loading : CreateReportUiState
-    data class Success(val warning: String? = null) : CreateReportUiState
+    data class Success(
+        val reportId: String,
+        val reportType: ReportStatus,
+        val warning: String? = null
+    ) : CreateReportUiState
     data class Error(val message: String) : CreateReportUiState
 }
 
 @HiltViewModel
 class CreateReportViewModel @Inject constructor(
     private val reportRepository: ReportRepository,
-    @ApplicationContext private val context: Context
+    @ApplicationContext private val context: Context,
+    savedStateHandle: SavedStateHandle
 ) : ViewModel() {
+
+    private val reportTypeArg: String = savedStateHandle.get<String>("reportType").orEmpty()
+    val reportType: ReportStatus = ReportStatus.fromString(reportTypeArg)
+        .takeIf { it == ReportStatus.LOST || it == ReportStatus.FOUND }
+        ?: ReportStatus.LOST
+
+    val isLostReport: Boolean = reportType == ReportStatus.LOST
 
     
     private val fusedLocationClient: FusedLocationProviderClient =
@@ -50,7 +63,7 @@ class CreateReportViewModel @Inject constructor(
     private val _description = MutableStateFlow("")
     val description: StateFlow<String> = _description.asStateFlow()
 
-    private val _selectedStatus = MutableStateFlow(ReportStatus.LOST)
+    private val _selectedStatus = MutableStateFlow(reportType)
     val selectedStatus: StateFlow<ReportStatus> = _selectedStatus.asStateFlow()
 
     private val _latitude = MutableStateFlow<Double?>(null)
@@ -213,7 +226,7 @@ class CreateReportViewModel @Inject constructor(
         val longitude = _longitude.value
         val photos = _selectedImageUris.value
 
-        if (petName.isEmpty()) {
+        if (isLostReport && petName.isEmpty()) {
             _uiState.value = CreateReportUiState.Error("Ingresa el nombre de la mascota.")
             return
         }
@@ -224,7 +237,6 @@ class CreateReportViewModel @Inject constructor(
             return
         }
 
-        
         if (_isUploadingImage.value) {
             _uiState.value = CreateReportUiState.Error("Espera a que las fotos terminen de subir.")
             return
@@ -248,9 +260,9 @@ class CreateReportViewModel @Inject constructor(
 
                 val report = Report(
                     userId = "",
-                    petName = petName,
+                    petName = petName.ifBlank { "Mascota encontrada" },
                     description = _description.value.trim(),
-                    status = _selectedStatus.value,
+                    status = reportType,
                     imageUrl = uploadedUrls.firstOrNull(),
                     imageUrls = uploadedUrls.takeIf { it.isNotEmpty() },
                     latitude = latitude,
@@ -258,7 +270,7 @@ class CreateReportViewModel @Inject constructor(
                 )
 
                 reportRepository.createReport(report)
-                    .onSuccess {
+                    .onSuccess { reportId ->
                         val warning = if (uploadResult.hasFailures) {
                             "El reporte se publicó, pero ${uploadResult.failedCount} " +
                                 if (uploadResult.failedCount == 1) {
@@ -269,7 +281,11 @@ class CreateReportViewModel @Inject constructor(
                         } else {
                             null
                         }
-                        _uiState.value = CreateReportUiState.Success(warning)
+                        _uiState.value = CreateReportUiState.Success(
+                            reportId = reportId,
+                            reportType = reportType,
+                            warning = warning
+                        )
                     }
                     .onFailure { error ->
                         deleteUploadedPhotos(uploadedUrls)

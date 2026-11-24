@@ -66,6 +66,7 @@ class NotificationHelper @Inject constructor(
             ReportStatus.LOST -> "Mascota perdida cerca de ti"
             ReportStatus.SIGHTED -> "Mascota avistada cerca de ti"
             ReportStatus.FOUND -> "Mascota encontrada cerca de ti"
+            ReportStatus.RESOLVED -> "Caso resuelto cerca de ti"
         }
 
         val contentText = buildString {

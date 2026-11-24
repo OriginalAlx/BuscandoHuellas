@@ -107,6 +107,7 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.IntSize
 import androidx.compose.ui.unit.dp
@@ -122,6 +123,7 @@ import androidx.hilt.lifecycle.viewmodel.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import coil.compose.AsyncImage
 import coil.request.ImageRequest
+import com.app.buscandohuellas.domain.model.Comment
 import com.app.buscandohuellas.domain.model.Report
 import com.app.buscandohuellas.domain.model.ReportStatus
 import com.app.buscandohuellas.ui.components.ReportReasonBottomSheet
@@ -151,6 +153,7 @@ fun ReportDetailScreen(
         ownerAvatarUrl: String?,
         reportId: String?
     ) -> Unit = { _, _, _, _ -> },
+    onCommentsClick: () -> Unit = {},
     refreshSignal: Int = 0,
     viewModel: ReportDetailViewModel = hiltViewModel()
 ) {
@@ -294,6 +297,7 @@ fun ReportDetailScreen(
                     }
                 },
                 onEditClick = onEditClick,
+                onCommentsClick = onCommentsClick,
                 onReportClick = viewModel::openReportSheet,
                 onProfileClick = {
                     showMessage("El perfil del reportante estará disponible pronto.")
@@ -422,6 +426,7 @@ private fun DetailContent(
     onStatusClick: () -> Unit,
     onContactClick: () -> Unit,
     onEditClick: () -> Unit,
+    onCommentsClick: () -> Unit,
     onReportClick: () -> Unit,
     onProfileClick: () -> Unit
 ) {
@@ -501,31 +506,34 @@ private fun DetailContent(
 
                 Spacer(modifier = Modifier.height(20.dp))
 
-                Button(
-                    onClick = onContactClick,
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .height(54.dp),
-                    shape = RoundedCornerShape(50),
-                    colors = ButtonDefaults.buttonColors(
-                        containerColor = BrandColors.Primary,
-                        contentColor = BrandColors.OnPrimary
-                    )
-                ) {
-                    Icon(
-                        imageVector = Icons.AutoMirrored.Filled.Chat,
-                        contentDescription = null,
-                        modifier = Modifier.size(20.dp)
-                    )
-                    Spacer(modifier = Modifier.width(8.dp))
-                    Text(
-                        text = "Contactar dueño",
-                        style = MaterialTheme.typography.bodyLarge,
-                        fontWeight = FontWeight.SemiBold
-                    )
-                }
+                // El dueño no puede contactarse a sí mismo.
+                if (!state.isOwner) {
+                    Button(
+                        onClick = onContactClick,
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(54.dp),
+                        shape = RoundedCornerShape(50),
+                        colors = ButtonDefaults.buttonColors(
+                            containerColor = BrandColors.Primary,
+                            contentColor = BrandColors.OnPrimary
+                        )
+                    ) {
+                        Icon(
+                            imageVector = Icons.AutoMirrored.Filled.Chat,
+                            contentDescription = null,
+                            modifier = Modifier.size(20.dp)
+                        )
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Text(
+                            text = "Contactar dueño",
+                            style = MaterialTheme.typography.bodyLarge,
+                            fontWeight = FontWeight.SemiBold
+                        )
+                    }
 
-                Spacer(modifier = Modifier.height(16.dp))
+                    Spacer(modifier = Modifier.height(16.dp))
+                }
 
                 SecondaryActions(
                     isOwner = state.isOwner,
@@ -535,7 +543,10 @@ private fun DetailContent(
 
                 Spacer(modifier = Modifier.height(24.dp))
 
-                SightingsSection(sightings = state.sightings)
+                CommentsSection(
+                    comments = state.comments,
+                    onSeeAll = onCommentsClick
+                )
 
                 Spacer(modifier = Modifier.height(24.dp))
             }
@@ -988,68 +999,96 @@ private fun ActionButton(
 }
 
 @Composable
-private fun SightingsSection(sightings: List<SightingUi>) {
-    Column(modifier = Modifier.fillMaxWidth()) {
-        Row(verticalAlignment = Alignment.CenterVertically) {
-            Text(
-                text = "Avistamientos",
-                style = MaterialTheme.typography.titleMedium,
-                fontWeight = FontWeight.Bold,
-                color = BrandColors.TextPrimary
-            )
+private fun CommentsSection(
+    comments: List<Comment>,
+    onSeeAll: () -> Unit
+) {
+    Card(
+        modifier = Modifier.fillMaxWidth(),
+        shape = RoundedCornerShape(16.dp),
+        colors = CardDefaults.cardColors(containerColor = BrandColors.Surface),
+        elevation = CardDefaults.cardElevation(defaultElevation = 2.dp)
+    ) {
+        Column(modifier = Modifier.fillMaxWidth().padding(16.dp)) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Text(
+                    text = "Comentarios",
+                    style = MaterialTheme.typography.titleMedium,
+                    fontWeight = FontWeight.Bold,
+                    color = BrandColors.TextPrimary,
+                    modifier = Modifier.weight(1f)
+                )
 
-            Spacer(modifier = Modifier.width(8.dp))
+                if (comments.isNotEmpty()) {
+                    Box(
+                        modifier = Modifier
+                            .clip(CircleShape)
+                            .background(BrandColors.PrimaryLight)
+                            .padding(horizontal = 8.dp, vertical = 2.dp)
+                    ) {
+                        Text(
+                            text = comments.size.toString(),
+                            style = MaterialTheme.typography.labelSmall,
+                            fontWeight = FontWeight.Bold,
+                            color = BrandColors.Primary
+                        )
+                    }
+                }
+            }
 
-            Box(
-                modifier = Modifier
-                    .clip(CircleShape)
-                    .background(BrandColors.PrimaryLight)
-                    .padding(horizontal = 8.dp, vertical = 2.dp)
+            Spacer(modifier = Modifier.height(8.dp))
+
+            if (comments.isEmpty()) {
+                Text(
+                    text = "Aún no hay comentarios. Comparte lo que sepas sobre este reporte.",
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = BrandColors.TextSecondary
+                )
+            } else {
+                comments.forEachIndexed { index, comment ->
+                    CommentPreviewItem(comment = comment)
+
+                    if (index != comments.lastIndex) {
+                        HorizontalDivider(
+                            thickness = 1.dp,
+                            color = BrandColors.Divider
+                        )
+                    }
+                }
+            }
+
+            Spacer(modifier = Modifier.height(12.dp))
+
+            TextButton(
+                onClick = onSeeAll,
+                modifier = Modifier.fillMaxWidth(),
+                shape = RoundedCornerShape(50)
             ) {
                 Text(
-                    text = sightings.size.toString(),
-                    style = MaterialTheme.typography.labelSmall,
-                    fontWeight = FontWeight.Bold,
+                    text = if (comments.isEmpty()) {
+                        "Ver comentarios"
+                    } else {
+                        "Ver todos los comentarios"
+                    },
+                    fontWeight = FontWeight.SemiBold,
                     color = BrandColors.Primary
                 )
-            }
-        }
-
-        Spacer(modifier = Modifier.height(8.dp))
-
-        if (sightings.isEmpty()) {
-            Text(
-                text = "Aún no hay avistamientos. Comparte si la viste.",
-                style = MaterialTheme.typography.bodyMedium,
-                color = BrandColors.TextSecondary,
-                modifier = Modifier.padding(vertical = 8.dp)
-            )
-        } else {
-            sightings.forEachIndexed { index, sighting ->
-                CommentItem(sighting = sighting)
-
-                if (index != sightings.lastIndex) {
-                    HorizontalDivider(
-                        thickness = 1.dp,
-                        color = BrandColors.Divider
-                    )
-                }
             }
         }
     }
 }
 
 @Composable
-private fun CommentItem(sighting: SightingUi) {
+private fun CommentPreviewItem(comment: Comment) {
     Row(
         modifier = Modifier
             .fillMaxWidth()
-            .padding(vertical = 12.dp),
+            .padding(vertical = 10.dp),
         verticalAlignment = Alignment.Top
     ) {
         UserAvatar(
-            name = sighting.authorName,
-            avatarUrl = sighting.authorAvatarUrl,
+            name = comment.userName,
+            avatarUrl = null,
             size = 32.dp
         )
 
@@ -1057,7 +1096,7 @@ private fun CommentItem(sighting: SightingUi) {
 
         Column(modifier = Modifier.weight(1f)) {
             Text(
-                text = sighting.authorName,
+                text = comment.userName,
                 style = MaterialTheme.typography.bodyMedium,
                 fontWeight = FontWeight.Bold,
                 color = BrandColors.TextPrimary
@@ -1066,9 +1105,11 @@ private fun CommentItem(sighting: SightingUi) {
             Spacer(modifier = Modifier.height(2.dp))
 
             Text(
-                text = sighting.message,
+                text = comment.content,
                 style = MaterialTheme.typography.bodyMedium,
-                color = BrandColors.TextSecondary
+                color = BrandColors.TextSecondary,
+                maxLines = 2,
+                overflow = TextOverflow.Ellipsis
             )
         }
     }

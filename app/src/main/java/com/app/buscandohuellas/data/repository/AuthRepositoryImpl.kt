@@ -4,7 +4,7 @@ import android.util.Log
 import com.app.buscandohuellas.domain.model.RegisterUser
 import com.app.buscandohuellas.domain.model.User
 import com.app.buscandohuellas.domain.repository.AuthRepository
-import com.app.buscandohuellas.util.FirebaseTokenManager
+import com.app.buscandohuellas.util.SessionLogoutManager
 import io.github.jan.supabase.SupabaseClient
 import io.github.jan.supabase.auth.auth
 import io.github.jan.supabase.auth.exception.AuthWeakPasswordException
@@ -14,7 +14,6 @@ import io.github.jan.supabase.exceptions.HttpRequestException
 import io.github.jan.supabase.exceptions.RestException
 import io.github.jan.supabase.postgrest.from
 import kotlinx.coroutines.CancellationException
-import kotlinx.coroutines.withTimeoutOrNull
 import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.buildJsonObject
@@ -28,7 +27,7 @@ private const val FULL_NAME_KEY = "full_name"
 
 class AuthRepositoryImpl(
     private val supabaseClient: SupabaseClient,
-    private val firebaseTokenManager: FirebaseTokenManager
+    private val sessionLogoutManager: SessionLogoutManager
 ) : AuthRepository {
 
     override suspend fun login(email: String, password: String): Result<User> = try {
@@ -130,37 +129,9 @@ class AuthRepositoryImpl(
     }
 
     override suspend fun logout() {
-        // Antes de invalidar la sesión se elimina el token FCM del servidor,
-        // porque la operación necesita el JWT del usuario para pasar RLS.
-        // Se limita el tiempo para que un problema de red no bloquee el logout.
-        try {
-            val tokenResult = withTimeoutOrNull(8_000L) {
-                firebaseTokenManager.deleteCurrentToken()
-            }
-            when {
-                tokenResult == null -> Log.e(
-                    "BH_DEBUG",
-                    "⚠️ Logout: timeout eliminando el token FCM; se cierra la sesión igualmente"
-                )
-
-                tokenResult.isSuccess -> Log.e(
-                    "BH_DEBUG",
-                    "✅ Logout: token FCM eliminado del servidor"
-                )
-
-                else -> Log.e(
-                    "BH_DEBUG",
-                    "⚠️ Logout: no se pudo eliminar el token FCM"
-                )
-            }
-        } catch (error: CancellationException) {
-            throw error
-        } catch (error: Exception) {
-            Log.e("BH_DEBUG", "⚠️ Logout: error eliminando el token FCM", error)
-        }
-
-        supabaseClient.auth.signOut()
-        Log.e("BH_DEBUG", "✅ Logout: sesión de Supabase cerrada")
+        // Mismo flujo que el cierre automático al eliminar la app de recientes:
+        // token FCM -> signOut -> DataStore -> caché local.
+        sessionLogoutManager.logout(reason = "manual")
     }
 
     

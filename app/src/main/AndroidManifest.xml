@@ -9,6 +9,10 @@
     <uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION" />
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
 
+    <!-- Necesario para el foreground service que cierra la sesión al salir. -->
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_DATA_SYNC" />
+
     <uses-permission android:name="android.permission.CAMERA" />
 
     <uses-feature
@@ -69,6 +73,17 @@
                 android:name="android.support.FILE_PROVIDER_PATHS"
                 android:resource="@xml/file_paths" />
         </provider>
+
+        <!--
+            Servicio que detecta onTaskRemoved y cierra la sesión de Supabase.
+            stopWithTask="false" es crítico: sin él, Android destruye el servicio
+            antes de que pueda ejecutar el logout.
+        -->
+        <service
+            android:name=".service.AppLifecycleService"
+            android:exported="false"
+            android:foregroundServiceType="dataSync"
+            android:stopWithTask="false" />
 
         <!-- Servicio de FCM: recibe los mensajes push y construye la notificación local. -->
         <service

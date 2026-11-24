@@ -41,6 +41,8 @@ data class ModeratorUiState(
     val reportToEdit: Report? = null,
     val reportToDelete: Report? = null,
     val moderatorName: String = "Moderador",
+    /** Rol leído de `public.user_roles`; `user` por defecto si no hay fila. */
+    val userRole: String = "user",
     val errorMessage: String? = null,
     val userMessage: String? = null,
     val isLoggedOut: Boolean = false,
@@ -50,4 +52,10 @@ data class ModeratorUiState(
      */
     val reportsLoadError: String? = null,
     val reportedPostsLoadError: String? = null
-)
+) {
+
+    /** Solo moderadores y admins pueden editar, eliminar o descartar denuncias. */
+    val canModerate: Boolean
+        get() = userRole.equals("moderator", ignoreCase = true) ||
+            userRole.equals("admin", ignoreCase = true)
+}

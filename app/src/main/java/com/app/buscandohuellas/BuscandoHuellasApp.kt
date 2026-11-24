@@ -1,11 +1,14 @@
 package com.app.buscandohuellas
 
 import android.app.Application
+import android.content.Intent
 import android.util.Log
+import androidx.core.content.ContextCompat
 import androidx.lifecycle.DefaultLifecycleObserver
 import androidx.lifecycle.LifecycleOwner
 import androidx.lifecycle.ProcessLifecycleOwner
 import com.app.buscandohuellas.data.NotificationPreferencesRepository
+import com.app.buscandohuellas.service.AppLifecycleService
 import com.app.buscandohuellas.service.ReportRealtimeService
 import com.app.buscandohuellas.util.NotificationHelper
 import dagger.hilt.android.HiltAndroidApp
@@ -42,8 +45,31 @@ class BuscandoHuellasApp : Application() {
         super.onCreate()
         Log.e("BH_DEBUG", "=== Application onCreate: Hilt inyectó correctamente ===")
         notificationHelper.createNotificationChannel()
+        startAppLifecycleService()
         observeNotificationPreferences()
         observeProcessLifecycle()
+    }
+
+    /**
+     * Arranca el servicio que vigila `onTaskRemoved`. El flag estático evita
+     * duplicados si el proceso se recrea dentro de la misma sesión; al morir el
+     * proceso el flag vuelve a false y el servicio se inicia de nuevo.
+     */
+    private fun startAppLifecycleService() {
+        if (AppLifecycleService.isRunning) {
+            Log.e("BH_DEBUG", "AppLifecycleService ya está corriendo; no se reinicia")
+            return
+        }
+
+        try {
+            ContextCompat.startForegroundService(
+                this,
+                Intent(this, AppLifecycleService::class.java)
+            )
+            Log.e("BH_DEBUG", "=== AppLifecycleService iniciado desde Application ===")
+        } catch (error: Exception) {
+            Log.e("BH_DEBUG", "No se pudo iniciar AppLifecycleService", error)
+        }
     }
 
     /**

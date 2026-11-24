@@ -1,5 +1,6 @@
 package com.app.buscandohuellas.navigation
 
+import android.util.Log
 import androidx.compose.animation.AnimatedContentTransitionScope
 import androidx.compose.animation.EnterTransition
 import androidx.compose.animation.ExitTransition
@@ -39,16 +40,21 @@ import androidx.navigation.compose.rememberNavController
 import androidx.navigation.navArgument
 import androidx.navigation.navDeepLink
 import com.app.buscandohuellas.SupabaseClient
+import com.app.buscandohuellas.ui.screens.alerts.AlertsScreen
 import com.app.buscandohuellas.ui.screens.chat.ChatScreen
+import com.app.buscandohuellas.ui.screens.chatlist.ChatListScreen
+import com.app.buscandohuellas.ui.screens.comments.CommentsScreen
 import com.app.buscandohuellas.ui.screens.createReport.CreateReportScreen
 import com.app.buscandohuellas.ui.screens.editProfile.EditProfileScreen
 import com.app.buscandohuellas.ui.screens.editReport.EditReportScreen
+import com.app.buscandohuellas.ui.screens.found.FoundPetMatchScreen
 import com.app.buscandohuellas.ui.screens.home.HomeScreen
 import com.app.buscandohuellas.ui.screens.home.HomeTab
 import com.app.buscandohuellas.ui.screens.login.LoginScreen
 import com.app.buscandohuellas.ui.screens.moderator.ModeratorScreen
 import com.app.buscandohuellas.ui.screens.myReports.MyReportsScreen
 import com.app.buscandohuellas.ui.screens.register.RegisterScreen
+import com.app.buscandohuellas.ui.screens.report.ReportTypeSelectionScreen
 import com.app.buscandohuellas.ui.screens.reportDetail.ReportDetailScreen
 import com.app.buscandohuellas.ui.screens.settings.NotificationSettingsScreen
 import com.app.buscandohuellas.ui.screens.settings.SettingsScreen
@@ -94,16 +100,24 @@ fun AppNavHost(
         .collectAsStateWithLifecycle(initialValue = SessionStatus.Initializing)
 
     // 1. Ruta inicial: se espera a que Supabase termine de cargar la sesión.
+    // Además del SessionStatus se comprueba currentUserOrNull(): si el logout
+    // automático ya borró la sesión persistida, hay que entrar siempre en login.
     LaunchedEffect(Unit) {
         val status = SupabaseClient.client.auth.sessionStatus
             .first { it !is SessionStatus.Initializing }
+        val hasActiveUser = SupabaseClient.client.auth.currentUserOrNull() != null
+
+        Log.d(
+            "BH_DEBUG",
+            "AppNavHost ruta inicial: status=${status::class.simpleName} hasActiveUser=$hasActiveUser"
+        )
 
         // Si un deep link ya navegó antes que este efecto, no se pisa la ruta.
         if (navController.currentBackStackEntry?.destination?.route != Screen.SPLASH) {
             return@LaunchedEffect
         }
 
-        val destination = if (status is SessionStatus.Authenticated) {
+        val destination = if (status is SessionStatus.Authenticated && hasActiveUser) {
             Screen.HOME
         } else {
             Screen.LOGIN
@@ -295,12 +309,13 @@ fun AppNavHost(
                 exitTransition = fadeExit,
                 popEnterTransition = fadeEnter,
                 popExitTransition = fadeExit
-            ) { entry ->
-                HomeDestination(
-                    backStackEntry = entry,
-                    tab = HomeTab.ALERTS,
-                    navController = navController,
-                    onNavigateToMain = navigateToMain
+            ) {
+                AlertsScreen(
+                    onReportClick = { reportId ->
+                        if (reportId.isNotBlank()) {
+                            navController.navigate(Screen.reportDetail(reportId))
+                        }
+                    }
                 )
             }
 
@@ -344,7 +359,7 @@ fun AppNavHost(
                             navController.navigate(Screen.editReport(reportId))
                         }
                     },
-                    onCreateReport = { navController.navigate(Screen.CREATE_REPORT) }
+                    onCreateReport = { navController.navigate(Screen.REPORT_TYPE_SELECTION) }
                 )
             }
 
@@ -379,10 +394,64 @@ fun AppNavHost(
                 )
             }
 
-            composable(Screen.CREATE_REPORT) {
+            composable(Screen.REPORT_TYPE_SELECTION) {
+                ReportTypeSelectionScreen(
+                    onLostClick = { navController.navigate(Screen.createReport("LOST")) },
+                    onFoundClick = { navController.navigate(Screen.createReport("FOUND")) },
+                    onClose = { navController.navigateUp() }
+                )
+            }
+
+            composable(
+                route = Screen.CREATE_REPORT,
+                arguments = listOf(
+                    navArgument(Screen.ARG_REPORT_TYPE) { type = NavType.StringType }
+                )
+            ) {
                 CreateReportScreen(
                     onReportCreated = { navController.navigateUp() },
+                    onFoundReportCreated = { reportId ->
+                        navController.navigate(Screen.foundPetMatch(reportId)) {
+                            popUpTo(Screen.REPORT_TYPE_SELECTION) { inclusive = true }
+                            launchSingleTop = true
+                        }
+                    },
                     onNavigateBack = { navController.navigateUp() }
+                )
+            }
+
+            composable(
+                route = Screen.FOUND_PET_MATCH,
+                arguments = listOf(
+                    navArgument(Screen.ARG_REPORT_ID) { type = NavType.StringType }
+                )
+            ) {
+                FoundPetMatchScreen(
+                    onNavigateBack = {
+                        Log.d("BH_DEBUG", "AppNavHost: onNavigateBack desde FoundPetMatch")
+                        navController.navigate(Screen.MAP) {
+                            popUpTo(Screen.HOME) { saveState = true }
+                            launchSingleTop = true
+                            restoreState = true
+                        }
+                    },
+                    onNoneOfThese = {
+                        Log.d("BH_DEBUG", "AppNavHost: onNoneOfThese desde FoundPetMatch")
+                        navController.navigate(Screen.createReport("FOUND")) {
+                            popUpTo(Screen.FOUND_PET_MATCH) { inclusive = true }
+                            launchSingleTop = true
+                        }
+                    },
+                    onOpenChat = { ownerId, ownerName, ownerAvatarUrl, lostReportId ->
+                        navController.navigate(
+                            Screen.chat(
+                                ownerId = ownerId,
+                                ownerName = ownerName,
+                                ownerAvatarUrl = ownerAvatarUrl,
+                                reportId = lostReportId
+                            )
+                        )
+                    }
                 )
             }
 
@@ -419,14 +488,49 @@ fun AppNavHost(
                             )
                         }
                     },
+                    onCommentsClick = {
+                        if (reportId.isNotBlank()) {
+                            navController.navigate(Screen.comments(reportId))
+                        }
+                    },
                     refreshSignal = reportUpdated
+                )
+            }
+
+            composable(
+                route = Screen.COMMENTS,
+                arguments = listOf(
+                    navArgument(Screen.ARG_REPORT_ID) { type = NavType.StringType }
+                )
+            ) {
+                CommentsScreen(
+                    onNavigateBack = { navController.navigateUp() }
+                )
+            }
+
+            composable(route = Screen.CHAT_LIST) {
+                ChatListScreen(
+                    onNavigateBack = { navController.navigateUp() },
+                    onConversationClick = { conversationId ->
+                        if (conversationId.isNotBlank()) {
+                            navController.navigate(Screen.chatById(conversationId))
+                        }
+                    }
                 )
             }
 
             composable(
                 route = Screen.CHAT,
                 arguments = listOf(
-                    navArgument(Screen.ARG_OWNER_ID) { type = NavType.StringType },
+                    navArgument(Screen.ARG_CONVERSATION_ID) {
+                        type = NavType.StringType
+                        defaultValue = Screen.NEW_CONVERSATION_ID
+                    },
+                    navArgument(Screen.ARG_OWNER_ID) {
+                        type = NavType.StringType
+                        nullable = true
+                        defaultValue = null
+                    },
                     navArgument(Screen.ARG_OWNER_NAME) {
                         type = NavType.StringType
                         nullable = true
@@ -526,7 +630,8 @@ private fun HomeDestination(
     HomeScreen(
         selectedTab = tab,
         onTabSelected = { selected -> onNavigateToMain(selected.toRoute()) },
-        onNavigateToCreateReport = { navController.navigate(Screen.CREATE_REPORT) },
+        onAlertsClick = { onNavigateToMain(Screen.ALERTS) },
+        onNavigateToCreateReport = { navController.navigate(Screen.REPORT_TYPE_SELECTION) },
         onReportClick = { reportId ->
             if (reportId.isNotBlank()) {
                 navController.navigate(Screen.reportDetail(reportId))

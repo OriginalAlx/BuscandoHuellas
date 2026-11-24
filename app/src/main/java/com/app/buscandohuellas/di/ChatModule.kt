@@ -9,8 +9,8 @@ import dagger.hilt.components.SingletonComponent
 import javax.inject.Singleton
 
 /**
- * Mantiene una única instancia del repositorio de chat para que las
- * conversaciones en memoria sobrevivan a la navegación entre pantallas.
+ * Mantiene una única instancia del repositorio de chat, que ahora persiste
+ * conversaciones y mensajes en Supabase.
  */
 @Module
 @InstallIn(SingletonComponent::class)

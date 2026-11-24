@@ -1,11 +1,19 @@
 package com.app.buscandohuellas.ui.screens.settings
 
 import android.Manifest
+import android.app.Activity
 import android.content.Context
+import android.content.ContextWrapper
+import android.content.Intent
 import android.content.pm.PackageManager
+import android.net.Uri
 import android.os.Build
+import android.provider.Settings
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -31,6 +39,7 @@ import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.Notifications
 import androidx.compose.material.icons.filled.Public
 import androidx.compose.material.icons.filled.WarningAmber
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
@@ -43,16 +52,18 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
-import androidx.compose.material3.Switch
-import androidx.compose.material3.SwitchDefaults
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.ReadOnlyComposable
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -63,13 +74,18 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.core.app.ActivityCompat
 import androidx.core.content.ContextCompat
 import androidx.hilt.lifecycle.viewmodel.compose.hiltViewModel
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.LifecycleEventObserver
+import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.app.buscandohuellas.data.NotificationRadius
 import com.app.buscandohuellas.domain.model.ReportStatus
 import com.app.buscandohuellas.ui.theme.BrandColors
 import com.app.buscandohuellas.ui.theme.textColor
+import com.app.buscandohuellas.ui.utils.RuntimePermissionRequestTracker
 
 private val WarningYellow: Color
     @Composable
@@ -95,7 +111,21 @@ fun NotificationSettingsScreen(
     val state by viewModel.uiState.collectAsStateWithLifecycle()
     val context = LocalContext.current
     val snackbarHostState = remember { SnackbarHostState() }
+    val lifecycleOwner = LocalLifecycleOwner.current
 
+    /** Estado real del permiso, verificado con ContextCompat al entrar. */
+    var hasNotificationPermission by remember {
+        mutableStateOf(isNotificationPermissionGranted(context))
+    }
+    var showNotificationSettingsDialog by remember { mutableStateOf(false) }
+
+    fun refreshPermissionState() {
+        hasNotificationPermission = isNotificationPermissionGranted(context)
+        viewModel.checkPermissions()
+    }
+
+    // Se conserva para el banner de ubicación; las notificaciones usan el
+    // launcher individual que exige el toggle.
     val permissionLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.RequestMultiplePermissions()
     ) { result ->
@@ -105,13 +135,58 @@ fun NotificationSettingsScreen(
                 hasLocationPermission(context)
         val notificationsGranted = Build.VERSION.SDK_INT < Build.VERSION_CODES.TIRAMISU ||
             result[Manifest.permission.POST_NOTIFICATIONS] == true ||
-            hasNotificationPermission(context)
+            isNotificationPermissionGranted(context)
+        val wasGranted = hasNotificationPermission
 
+        RuntimePermissionRequestTracker.markLocationRequested()
+        if (result.containsKey(Manifest.permission.POST_NOTIFICATIONS)) {
+            RuntimePermissionRequestTracker.markNotificationsRequested()
+        }
+        hasNotificationPermission = notificationsGranted
         viewModel.updatePermissions(locationGranted, notificationsGranted)
+        if (notificationsGranted && !wasGranted) {
+            viewModel.onNotificationPermissionGranted()
+        }
+    }
+
+    val notificationPermissionLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.RequestPermission()
+    ) { granted ->
+        val isGranted = granted || isNotificationPermissionGranted(context)
+        val wasGranted = hasNotificationPermission
+
+        RuntimePermissionRequestTracker.markNotificationsRequested()
+        hasNotificationPermission = isGranted
+        viewModel.updatePermissions(hasLocationPermission(context), isGranted)
+
+        if (isGranted) {
+            if (!wasGranted) viewModel.onNotificationPermissionGranted()
+        } else {
+            viewModel.onNotificationPermissionDenied()
+            val activity = context.findActivity()
+            if (activity != null &&
+                !ActivityCompat.shouldShowRequestPermissionRationale(
+                    activity,
+                    Manifest.permission.POST_NOTIFICATIONS
+                )
+            ) {
+                showNotificationSettingsDialog = true
+            }
+        }
     }
 
     LaunchedEffect(Unit) {
-        viewModel.checkPermissions()
+        refreshPermissionState()
+    }
+
+    // Si el usuario activa el permiso en Ajustes y vuelve, la pantalla debe
+    // reflejarlo sin necesidad de recrearse.
+    DisposableEffect(lifecycleOwner) {
+        val observer = LifecycleEventObserver { _, event ->
+            if (event == Lifecycle.Event.ON_RESUME) refreshPermissionState()
+        }
+        lifecycleOwner.lifecycle.addObserver(observer)
+        onDispose { lifecycleOwner.lifecycle.removeObserver(observer) }
     }
 
     val message = state.message ?: state.errorMessage
@@ -167,33 +242,45 @@ fun NotificationSettingsScreen(
                     .padding(horizontal = 20.dp, vertical = 16.dp),
                 verticalArrangement = Arrangement.spacedBy(20.dp)
             ) {
-                if (state.showPermissionBanner) {
+                // El banner queda reservado a la ubicación: las notificaciones
+                // se gestionan exclusivamente desde su tarjeta.
+                if (!state.hasLocationPermission) {
                     PermissionBanner(
-                        missingLocation = !state.hasLocationPermission,
-                        missingNotifications = !state.hasNotificationPermission,
+                        missingLocation = true,
+                        missingNotifications = false,
                         onActivate = {
-                            val permissions = buildList {
-                                if (!state.hasLocationPermission) {
-                                    add(Manifest.permission.ACCESS_FINE_LOCATION)
-                                    add(Manifest.permission.ACCESS_COARSE_LOCATION)
-                                }
-                                if (!state.hasNotificationPermission &&
-                                    Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU
-                                ) {
-                                    add(Manifest.permission.POST_NOTIFICATIONS)
-                                }
-                            }
-                            if (permissions.isNotEmpty()) {
-                                permissionLauncher.launch(permissions.toTypedArray())
-                            }
+                            permissionLauncher.launch(
+                                arrayOf(
+                                    Manifest.permission.ACCESS_FINE_LOCATION,
+                                    Manifest.permission.ACCESS_COARSE_LOCATION
+                                )
+                            )
                         }
                     )
                 }
 
-                ActivationCard(
-                    enabled = state.enabled,
-                    onEnabledChange = viewModel::setEnabled
-                )
+                // La tarjeta depende únicamente de la preferencia guardada:
+                // con notifications_enabled = true no se renderiza.
+                AnimatedVisibility(
+                    visible = !state.notificationsEnabled,
+                    enter = fadeIn(),
+                    exit = fadeOut()
+                ) {
+                    NotificationDisabledCard(
+                        isSaving = state.isSaving,
+                        onActivate = {
+                            if (hasNotificationPermission) {
+                                // El permiso del sistema ya está concedido:
+                                // solo se persiste la preferencia.
+                                viewModel.setNotificationsEnabled(true)
+                            } else {
+                                notificationPermissionLauncher.launch(
+                                    Manifest.permission.POST_NOTIFICATIONS
+                                )
+                            }
+                        }
+                    )
+                }
 
                 RadiusSection(
                     selected = state.radius,
@@ -270,6 +357,38 @@ fun NotificationSettingsScreen(
             }
         }
     }
+
+    if (showNotificationSettingsDialog) {
+        AlertDialog(
+            onDismissRequest = { showNotificationSettingsDialog = false },
+            title = { Text("Permiso de notificaciones desactivado") },
+            text = {
+                Text(
+                    "Marcaste «No volver a preguntar». Para recibir alertas, abre " +
+                        "Ajustes → Aplicaciones → Buscando Huellas → Permisos y habilita Notificaciones."
+                )
+            },
+            confirmButton = {
+                TextButton(
+                    onClick = {
+                        showNotificationSettingsDialog = false
+                        val intent = Intent(
+                            Settings.ACTION_APPLICATION_DETAILS_SETTINGS,
+                            Uri.fromParts("package", context.packageName, null)
+                        ).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                        context.startActivity(intent)
+                    }
+                ) {
+                    Text("Abrir configuración")
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { showNotificationSettingsDialog = false }) {
+                    Text("Cancelar")
+                }
+            }
+        )
+    }
 }
 
 @Composable
@@ -338,9 +457,9 @@ private fun PermissionBanner(
 }
 
 @Composable
-private fun ActivationCard(
-    enabled: Boolean,
-    onEnabledChange: (Boolean) -> Unit
+private fun NotificationDisabledCard(
+    isSaving: Boolean,
+    onActivate: () -> Unit
 ) {
     Card(
         shape = RoundedCornerShape(20.dp),
@@ -372,28 +491,38 @@ private fun ActivationCard(
 
             Column(modifier = Modifier.weight(1f)) {
                 Text(
-                    text = "Activar notificaciones",
+                    text = "Notificaciones desactivadas",
                     style = MaterialTheme.typography.titleMedium,
                     fontWeight = FontWeight.Bold,
                     color = BrandColors.TextPrimary
                 )
                 Text(
-                    text = "Recibe avisos cuando aparezcan reportes cerca de ti.",
+                    text = "Actívalas para recibir alertas de reportes cercanos.",
                     style = MaterialTheme.typography.bodySmall,
                     color = BrandColors.TextSecondary
                 )
             }
 
-            Switch(
-                checked = enabled,
-                onCheckedChange = onEnabledChange,
-                colors = SwitchDefaults.colors(
-                    checkedThumbColor = BrandColors.OnPrimary,
-                    checkedTrackColor = BrandColors.Primary,
-                    uncheckedThumbColor = MaterialTheme.colorScheme.onSurface,
-                    uncheckedTrackColor = BrandColors.Divider
+            Spacer(modifier = Modifier.width(8.dp))
+
+            Button(
+                onClick = onActivate,
+                enabled = !isSaving,
+                modifier = Modifier.height(36.dp),
+                shape = RoundedCornerShape(50),
+                colors = ButtonDefaults.buttonColors(
+                    containerColor = BrandColors.Primary,
+                    contentColor = BrandColors.OnPrimary,
+                    disabledContainerColor = BrandColors.DisabledBackground,
+                    disabledContentColor = BrandColors.DisabledText
                 )
-            )
+            ) {
+                Text(
+                    text = "Activar",
+                    fontWeight = FontWeight.SemiBold,
+                    fontSize = 12.sp
+                )
+            }
         }
     }
 }
@@ -712,9 +841,16 @@ private fun hasLocationPermission(context: Context): Boolean =
             Manifest.permission.ACCESS_COARSE_LOCATION
         ) == PackageManager.PERMISSION_GRANTED
 
-private fun hasNotificationPermission(context: Context): Boolean =
+private fun isNotificationPermissionGranted(context: Context): Boolean =
     Build.VERSION.SDK_INT < Build.VERSION_CODES.TIRAMISU ||
         ContextCompat.checkSelfPermission(
             context,
             Manifest.permission.POST_NOTIFICATIONS
         ) == PackageManager.PERMISSION_GRANTED
+
+/** Busca la Activity anclada al contexto de Compose. */
+private tailrec fun Context.findActivity(): Activity? = when (this) {
+    is Activity -> this
+    is ContextWrapper -> baseContext.findActivity()
+    else -> null
+}

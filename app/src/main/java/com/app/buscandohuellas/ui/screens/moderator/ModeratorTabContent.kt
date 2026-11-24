@@ -108,6 +108,7 @@ internal fun AllReportsTabContent(
                 ModeratorReportCard(
                     report = report,
                     isActionLoading = uiState.isActionLoading,
+                    canModerate = uiState.canModerate,
                     onEdit = { onEdit(report) },
                     onDelete = { onDelete(report) },
                     onClick = {
@@ -190,6 +191,7 @@ internal fun CommunityReportsTabContent(
                 ReportedPostCard(
                     post = post,
                     isActionLoading = uiState.isActionLoading,
+                    canModerate = uiState.canModerate,
                     onView = {
                         post.report.id?.let(onReportClick)
                     },

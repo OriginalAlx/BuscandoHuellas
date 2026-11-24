@@ -14,6 +14,7 @@ import com.app.buscandohuellas.domain.model.Report
 import com.app.buscandohuellas.domain.repository.AuthRepository
 import com.app.buscandohuellas.domain.repository.ProfileRepository
 import com.app.buscandohuellas.domain.repository.ReportRepository
+import com.app.buscandohuellas.util.FirebaseTokenManager
 import com.google.android.gms.location.CurrentLocationRequest
 import com.google.android.gms.location.FusedLocationProviderClient
 import com.google.android.gms.location.LocationServices
@@ -32,7 +33,8 @@ import javax.inject.Inject
 class HomeViewModel @Inject constructor(
     private val authRepository: AuthRepository,
     private val reportRepository: ReportRepository,
-    private val profileRepository: ProfileRepository
+    private val profileRepository: ProfileRepository,
+    private val firebaseTokenManager: FirebaseTokenManager
 ) : ViewModel() {
 
     private val _uiState = MutableStateFlow(HomeUiState())
@@ -205,6 +207,12 @@ class HomeViewModel @Inject constructor(
         _showPermissionDeniedDialog.value = false
         _mapError.value = null
         _isLoading.value = false
+
+        // La Edge Function necesita la ubicación del usuario para aplicar el
+        // radio de notificaciones. Es best-effort: si falla, la app sigue.
+        viewModelScope.launch {
+            firebaseTokenManager.updateLocation(location.latitude, location.longitude)
+        }
 
         updateRecentReports()
 

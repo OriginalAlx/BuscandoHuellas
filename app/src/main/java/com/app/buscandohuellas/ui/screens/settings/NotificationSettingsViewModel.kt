@@ -11,6 +11,7 @@ import com.app.buscandohuellas.data.NotificationPreferences
 import com.app.buscandohuellas.data.NotificationPreferencesRepository
 import com.app.buscandohuellas.data.NotificationRadius
 import com.app.buscandohuellas.service.ReportRealtimeService
+import com.app.buscandohuellas.util.FirebaseTokenManager
 import com.app.buscandohuellas.util.NotificationHelper
 import dagger.hilt.android.lifecycle.HiltViewModel
 import dagger.hilt.android.qualifiers.ApplicationContext
@@ -34,6 +35,7 @@ class NotificationSettingsViewModel @Inject constructor(
     private val preferencesRepository: NotificationPreferencesRepository,
     private val realtimeService: ReportRealtimeService,
     private val notificationHelper: NotificationHelper,
+    private val firebaseTokenManager: FirebaseTokenManager,
     @ApplicationContext private val context: Context
 ) : ViewModel() {
 
@@ -48,15 +50,33 @@ class NotificationSettingsViewModel @Inject constructor(
     fun loadPreferences() {
         viewModelScope.launch {
             val preferences = preferencesRepository.preferences.first()
+
+            // El permiso del sistema es la fuente de verdad: si ya se concedió
+            // desde HomeScreen, la preferencia debe quedar activa también.
+            val notificationsGranted = notificationHelper.hasNotificationPermission()
+            val enabled = preferences.enabled || notificationsGranted
+
             _uiState.update { state ->
                 state.copy(
                     isLoading = false,
-                    enabled = preferences.enabled,
+                    enabled = enabled,
                     radius = preferences.radius,
                     notifyLost = preferences.notifyLost,
                     notifySighted = preferences.notifySighted,
                     notifyFound = preferences.notifyFound
                 )
+            }
+
+            if (enabled && !preferences.enabled) {
+                try {
+                    preferencesRepository.setEnabled(true)
+                    realtimeService.restart()
+                    syncPreferencesToServer(preferences.copy(enabled = true))
+                } catch (error: CancellationException) {
+                    throw error
+                } catch (error: Exception) {
+                    Log.e(TAG, "No se pudo sincronizar notifications_enabled", error)
+                }
             }
         }
     }
@@ -97,7 +117,9 @@ class NotificationSettingsViewModel @Inject constructor(
         _uiState.update {
             it.copy(
                 hasLocationPermission = hasLocationPermission,
-                hasNotificationPermission = hasNotificationPermission
+                hasNotificationPermission = hasNotificationPermission,
+                // Sin permiso del sistema el toggle no puede quedar encendido.
+                enabled = if (hasNotificationPermission) it.enabled else false
             )
         }
 
@@ -124,12 +146,109 @@ class NotificationSettingsViewModel @Inject constructor(
     }
 
     /**
+     * Cambia únicamente `notifications_enabled` en DataStore. No revoca ni
+     * solicita permisos del sistema y conserva radio y tipos tal cual.
+     */
+    fun setNotificationsEnabled(enabled: Boolean) {
+        val previousEnabled = _uiState.value.enabled
+
+        viewModelScope.launch {
+            // Actualización optimista: el StateFlow emite el nuevo valor de
+            // inmediato para que la tarjeta desaparezca sin esperar a DataStore.
+            _uiState.update {
+                it.copy(
+                    enabled = enabled,
+                    isSaving = true,
+                    errorMessage = null,
+                    message = null
+                )
+            }
+            try {
+                preferencesRepository.setEnabled(enabled)
+
+                if (enabled) {
+                    realtimeService.restart()
+                } else {
+                    realtimeService.stop()
+                }
+                val current = _uiState.value
+                syncPreferencesToServer(
+                    NotificationPreferences(
+                        enabled = enabled,
+                        radius = current.radius,
+                        notifyLost = current.notifyLost,
+                        notifySighted = current.notifySighted,
+                        notifyFound = current.notifyFound
+                    )
+                )
+
+                _uiState.update {
+                    it.copy(
+                        enabled = enabled,
+                        isSaving = false,
+                        message = if (enabled) {
+                            "Notificaciones activadas."
+                        } else {
+                            "Notificaciones desactivadas."
+                        }
+                    )
+                }
+            } catch (error: CancellationException) {
+                throw error
+            } catch (error: Exception) {
+                Log.e(TAG, "No se pudo actualizar el estado de notificaciones", error)
+                _uiState.update {
+                    it.copy(
+                        enabled = previousEnabled,
+                        isSaving = false,
+                        errorMessage = "No se pudo actualizar las notificaciones. Inténtalo de nuevo."
+                    )
+                }
+            }
+        }
+    }
+
+    /** El permiso del sistema se concedió: se activa y se persiste la preferencia. */
+    fun onNotificationPermissionGranted() {
+        setNotificationsEnabled(enabled = true)
+    }
+
+    /** El permiso se denegó: la tarjeta permanece visible y se explica por qué. */
+    fun onNotificationPermissionDenied() {
+        _uiState.update {
+            it.copy(
+                enabled = false,
+                message = null,
+                errorMessage = "Sin el permiso de notificaciones no podemos avisarte " +
+                    "de reportes cercanos."
+            )
+        }
+    }
+
+    /**
      * Envía una notificación local de prueba, independiente de Supabase
      * Realtime, para validar permisos y canal.
      */
     fun sendTestNotification() {
         Log.e(TAG, "🧪 Enviando notificación de prueba desde el ViewModel")
         notificationHelper.sendTestNotification(context)
+    }
+
+    /**
+     * Refleja en `user_notification_tokens` las preferencias indicadas para
+     * que la Edge Function pueda filtrar por radio y tipo de reporte. Es
+     * best-effort: un fallo de red no debe impedir guardar en local.
+     */
+    private suspend fun syncPreferencesToServer(preferences: NotificationPreferences) {
+        firebaseTokenManager.syncNotificationPreferences(
+            enabled = preferences.enabled,
+            radiusKm = preferences.radiusKm,
+            notifyLost = preferences.notifyLost,
+            notifySighted = preferences.notifySighted,
+            notifyFound = preferences.notifyFound
+        ).onFailure { error ->
+            Log.w(TAG, "No se pudieron sincronizar las preferencias en Supabase", error)
+        }
     }
 
     private fun hasLocationPermission(): Boolean =
@@ -166,6 +285,7 @@ class NotificationSettingsViewModel @Inject constructor(
                 } else {
                     realtimeService.stop()
                 }
+                syncPreferencesToServer(preferences)
 
                 _uiState.update {
                     it.copy(

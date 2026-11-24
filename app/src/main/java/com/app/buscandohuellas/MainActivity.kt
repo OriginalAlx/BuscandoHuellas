@@ -8,25 +8,20 @@
 
 package com.app.buscandohuellas
 
-import android.Manifest
 import android.content.Intent
-import android.content.pm.PackageManager
 import android.content.res.Configuration
 import android.graphics.Color as AndroidColor
 import android.graphics.drawable.ColorDrawable
-import android.os.Build
 import android.os.Bundle
 import android.util.Log
 import androidx.activity.ComponentActivity
 import androidx.activity.SystemBarStyle
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
-import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
-import androidx.core.content.ContextCompat
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.lifecycleScope
 import com.app.buscandohuellas.data.ThemePreferencesRepository
@@ -80,28 +75,6 @@ class MainActivity : ComponentActivity() {
      */
     private var initialTheme: AppTheme = AppTheme.SYSTEM
 
-    /**
-     * Registra el resultado de los permisos de ubicación solicitados en
-     * runtime y loguea cada resultado con el tag "BH_DEBUG".
-     */
-    private val locationPermissionLauncher = registerForActivityResult(
-        ActivityResultContracts.RequestMultiplePermissions()
-    ) { result ->
-        result.forEach { (permission, granted) ->
-            Log.e("BH_DEBUG", "Resultado permiso $permission -> concedido=$granted")
-        }
-    }
-
-    /**
-     * Launcher dedicado para POST_NOTIFICATIONS (Android 13+). Se mantiene
-     * separado del de ubicación para loguear el resultado exacto.
-     */
-    private val notificationPermissionLauncher = registerForActivityResult(
-        ActivityResultContracts.RequestPermission()
-    ) { granted ->
-        Log.e("BH_DEBUG", "Resultado permiso notificaciones: $granted")
-    }
-
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         OsmDroidInitializer.initialize(this)
@@ -134,9 +107,8 @@ class MainActivity : ComponentActivity() {
         // Es el único punto de inicialización del token en toda la app.
         fetchFcmTokenAndSync()
 
-        // Justo después de la lógica de Firebase, se comprueba/solicita el
-        // permiso de notificaciones (Android 13+).
-        requestNotificationPermissionIfNeeded()
+        // Los permisos en runtime los solicita HomeScreen al entrar, para que
+        // el usuario vea un único diálogo en el momento en que se necesitan.
 
         // Si el usuario inicia sesión después, se reutiliza el token cacheado.
         observeSessionForTokenSync()
@@ -169,8 +141,6 @@ class MainActivity : ComponentActivity() {
                 )
             }
         }
-
-        requestLocationPermissionIfNeeded()
     }
 
     override fun onNewIntent(intent: Intent) {
@@ -352,54 +322,6 @@ class MainActivity : ComponentActivity() {
                     else -> Unit
                 }
             }
-        }
-    }
-
-    /** Solicita POST_NOTIFICATIONS (Android 13+) si aún no está concedido. */
-    private fun requestNotificationPermissionIfNeeded() {
-        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.TIRAMISU) {
-            Log.e("BH_DEBUG", "🔔 Permiso de notificaciones: no requerido en Android < 13")
-            return
-        }
-
-        val hasNotifications = ContextCompat.checkSelfPermission(
-            this,
-            Manifest.permission.POST_NOTIFICATIONS
-        ) == PackageManager.PERMISSION_GRANTED
-
-        Log.e(
-            "BH_DEBUG",
-            "🔔 Permiso de notificaciones: ${if (hasNotifications) "concedido" else "denegado"}"
-        )
-        if (!hasNotifications) {
-            Log.e("BH_DEBUG", "Solicitando permiso POST_NOTIFICATIONS...")
-            notificationPermissionLauncher.launch(Manifest.permission.POST_NOTIFICATIONS)
-        }
-    }
-
-    /** Solicita los permisos de ubicación si aún no están concedidos. */
-    private fun requestLocationPermissionIfNeeded() {
-        val hasLocation = ContextCompat.checkSelfPermission(
-            this,
-            Manifest.permission.ACCESS_FINE_LOCATION
-        ) == PackageManager.PERMISSION_GRANTED ||
-            ContextCompat.checkSelfPermission(
-                this,
-                Manifest.permission.ACCESS_COARSE_LOCATION
-            ) == PackageManager.PERMISSION_GRANTED
-
-        Log.e(
-            "BH_DEBUG",
-            "📍 Permiso de ubicación: ${if (hasLocation) "concedido" else "denegado"}"
-        )
-        if (!hasLocation) {
-            Log.e("BH_DEBUG", "Solicitando permisos de ubicación...")
-            locationPermissionLauncher.launch(
-                arrayOf(
-                    Manifest.permission.ACCESS_FINE_LOCATION,
-                    Manifest.permission.ACCESS_COARSE_LOCATION
-                )
-            )
         }
     }
 }

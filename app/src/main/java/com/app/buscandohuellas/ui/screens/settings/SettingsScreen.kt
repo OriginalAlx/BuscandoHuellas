@@ -76,6 +76,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.core.net.toUri
 import androidx.hilt.lifecycle.viewmodel.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.app.buscandohuellas.BuildConfig
@@ -665,7 +666,9 @@ private fun sendSupportEmail(context: Context): Boolean {
         Dispositivo: $device
     """.trimIndent()
 
-    val intent = Intent(Intent.ACTION_SENDTO, Uri.parse("mailto:")).apply {
+    // ACTION_SENDTO exige el destinatario en el propio URI; algunos clientes
+    // de correo ignoran EXTRA_EMAIL y el borrador quedaba sin destinatario.
+    val intent = Intent(Intent.ACTION_SENDTO, "mailto:$SUPPORT_EMAIL".toUri()).apply {
         putExtra(Intent.EXTRA_EMAIL, arrayOf(SUPPORT_EMAIL))
         putExtra(Intent.EXTRA_SUBJECT, "Soporte Buscando Huellas")
         putExtra(Intent.EXTRA_TEXT, body)

@@ -47,5 +47,6 @@ class NotificationRadiusTest {
         assertTrue(preferences.isStatusEnabled(ReportStatus.LOST))
         assertFalse(preferences.isStatusEnabled(ReportStatus.SIGHTED))
         assertTrue(preferences.isStatusEnabled(ReportStatus.FOUND))
+        assertFalse(preferences.isStatusEnabled(ReportStatus.RESOLVED))
     }
 }

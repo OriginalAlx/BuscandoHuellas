@@ -11,6 +11,7 @@ import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -22,6 +23,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.GpsFixed
 import androidx.compose.material.icons.filled.LocationOff
@@ -34,11 +36,14 @@ import androidx.compose.material3.Card
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FloatingActionButton
+import androidx.compose.material3.FloatingActionButtonDefaults
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Scaffold
+import androidx.compose.material3.SnackbarHost
+import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
@@ -48,11 +53,15 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.viewinterop.AndroidView
@@ -60,7 +69,12 @@ import androidx.core.content.ContextCompat
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.compose.LocalLifecycleOwner
+import com.app.buscandohuellas.ui.utils.LocationUtils
+import kotlinx.coroutines.launch
 import org.osmdroid.events.MapEventsReceiver
+import org.osmdroid.events.MapListener
+import org.osmdroid.events.ScrollEvent
+import org.osmdroid.events.ZoomEvent
 import org.osmdroid.tileprovider.tilesource.TileSourceFactory
 import org.osmdroid.util.GeoPoint
 import org.osmdroid.views.MapView
@@ -68,6 +82,10 @@ import org.osmdroid.views.overlay.MapEventsOverlay
 import org.osmdroid.views.overlay.Marker
 import org.osmdroid.views.overlay.mylocation.MyLocationNewOverlay
 import java.util.Locale
+
+private const val USER_LOCATION_ZOOM = 17.0
+private const val LOCATION_ERROR_MESSAGE = "No se pudo obtener tu ubicación. Verifica el GPS."
+private val MapLavender = Color(0xFF8B7CFF)
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -77,11 +95,15 @@ fun MapPickerScreen(
     currentLatitude: Double?,
     currentLongitude: Double?,
     isLocating: Boolean,
+    locationError: String? = null,
     onUseCurrentLocation: () -> Unit,
     onConfirm: (latitude: Double, longitude: Double) -> Unit,
     onCancel: () -> Unit
 ) {
     val context = LocalContext.current
+    val snackbarHostState = remember { SnackbarHostState() }
+    val scope = rememberCoroutineScope()
+    val density = LocalDensity.current
     val locationManager = remember {
         context.getSystemService(Context.LOCATION_SERVICE) as LocationManager
     }
@@ -117,6 +139,8 @@ fun MapPickerScreen(
     var myLocationOverlay by remember { mutableStateOf<MyLocationNewOverlay?>(null) }
     var centeredOnUser by remember { mutableStateOf(false) }
     var selectedPoint by remember { mutableStateOf(initialPoint()) }
+    var confirmationCardHeight by remember { mutableStateOf(0) }
+    var lastShownLocationError by remember { mutableStateOf<String?>(null) }
 
     val permissionLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.RequestMultiplePermissions()
@@ -196,7 +220,8 @@ fun MapPickerScreen(
         val userPoint = myLocationOverlay?.myLocation
         if (userPoint != null) {
             mapInstance?.controller?.animateTo(userPoint)
-            mapInstance?.controller?.setZoom(16.0)
+            mapInstance?.controller?.setZoom(USER_LOCATION_ZOOM)
+            centeredOnUser = true
         } else {
             onUseCurrentLocation()
         }
@@ -240,7 +265,7 @@ fun MapPickerScreen(
                 overlay.runOnFirstFix {
                     overlay.myLocation?.let { point ->
                         map.controller.setCenter(point)
-                        map.controller.setZoom(16.0)
+                        map.controller.setZoom(USER_LOCATION_ZOOM)
                     }
                 }
                 myLocationOverlay = overlay
@@ -258,6 +283,16 @@ fun MapPickerScreen(
             val point = GeoPoint(currentLatitude, currentLongitude)
             selectedPoint = point
             mapInstance?.controller?.animateTo(point)
+            mapInstance?.controller?.setZoom(USER_LOCATION_ZOOM)
+        }
+    }
+
+    LaunchedEffect(locationError) {
+        if (locationError == null) {
+            lastShownLocationError = null
+        } else if (locationError != lastShownLocationError) {
+            lastShownLocationError = locationError
+            snackbarHostState.showSnackbar(LOCATION_ERROR_MESSAGE)
         }
     }
 
@@ -306,7 +341,8 @@ fun MapPickerScreen(
                     }
                 }
             )
-        }
+        },
+        snackbarHost = { SnackbarHost(snackbarHostState) }
     ) { paddingValues ->
         Box(
             modifier = Modifier
@@ -322,7 +358,7 @@ fun MapPickerScreen(
 
                         val startPoint = selectedPoint
                         if (startPoint != null) {
-                            controller.setZoom(16.0)
+                            controller.setZoom(USER_LOCATION_ZOOM)
                             controller.setCenter(startPoint)
                         } else {
                             controller.setZoom(2.0)
@@ -338,6 +374,7 @@ fun MapPickerScreen(
 
                                 override fun onMarkerDragEnd(p0: Marker?) {
                                     p0?.let { selectedPoint = it.position }
+                                    centeredOnUser = false
                                 }
 
                                 override fun onMarkerDragStart(p0: Marker?) {}
@@ -351,6 +388,7 @@ fun MapPickerScreen(
                                     selectedPoint = it
                                     marker.position = it
                                     marker.isEnabled = true
+                                    centeredOnUser = false
                                 }
                                 return true
                             }
@@ -358,6 +396,23 @@ fun MapPickerScreen(
                             override fun longPressHelper(p: GeoPoint?): Boolean = false
                         })
                         overlays.add(mapEventsOverlay)
+
+                        addMapListener(object : MapListener {
+                            override fun onScroll(event: ScrollEvent?): Boolean {
+                                val user = myLocationOverlay?.myLocation
+                                val center = mapCenter
+                                centeredOnUser = user != null &&
+                                    LocationUtils.calculateDistance(
+                                        center.latitude,
+                                        center.longitude,
+                                        user.latitude,
+                                        user.longitude
+                                    ) < 0.02
+                                return false
+                            }
+
+                            override fun onZoom(event: ZoomEvent?): Boolean = false
+                        })
 
                         mapInstance = this
                     }
@@ -369,7 +424,7 @@ fun MapPickerScreen(
                         overlay.runOnFirstFix {
                             overlay.myLocation?.let { point ->
                                 mapView.controller.setCenter(point)
-                                mapView.controller.setZoom(16.0)
+                                mapView.controller.setZoom(USER_LOCATION_ZOOM)
                             }
                         }
                         myLocationOverlay = overlay
@@ -395,33 +450,54 @@ fun MapPickerScreen(
                 )
             }
 
+            val fabBottomPadding = if (confirmationCardHeight > 0) {
+                with(density) { confirmationCardHeight.toDp() } + 16.dp
+            } else {
+                208.dp
+            }
+
             FloatingActionButton(
                 onClick = {
+                    // Evita múltiples solicitudes mientras se obtiene la ubicación.
+                    if (isLocating) return@FloatingActionButton
                     when {
                         !isGpsEnabled() -> {
                             gpsEnabled = false
                             showGpsDialog = true
+                            scope.launch { snackbarHostState.showSnackbar(LOCATION_ERROR_MESSAGE) }
                         }
 
                         !hasLocationPermission() -> requestLocationPermissions()
                         else -> focusOnUserLocation()
                     }
                 },
-                containerColor = Color(0xFF2196F3),
-                contentColor = Color.White,
+                shape = CircleShape,
+                containerColor = Color.White,
+                contentColor = MapLavender,
+                elevation = FloatingActionButtonDefaults.elevation(
+                    defaultElevation = 6.dp,
+                    pressedElevation = 10.dp
+                ),
                 modifier = Modifier
                     .align(Alignment.BottomEnd)
-                    .padding(16.dp)
+                    .padding(end = 16.dp, bottom = fabBottomPadding)
+                    .size(56.dp)
+                    .alpha(if (isLocating) 0.85f else 1f)
             ) {
                 if (isLocating) {
                     CircularProgressIndicator(
                         modifier = Modifier.size(24.dp),
-                        strokeWidth = 2.dp
+                        strokeWidth = 2.dp,
+                        color = MapLavender
                     )
                 } else {
                     Icon(
-                        imageVector = Icons.Filled.MyLocation,
-                        contentDescription = "Centrar en mi ubicación"
+                        imageVector = if (centeredOnUser) Icons.Filled.Check else Icons.Filled.MyLocation,
+                        contentDescription = if (centeredOnUser) {
+                            "Mapa centrado en tu ubicación"
+                        } else {
+                            "Centrar en mi ubicación"
+                        }
                     )
                 }
             }
@@ -430,6 +506,7 @@ fun MapPickerScreen(
                 modifier = Modifier
                     .align(Alignment.BottomCenter)
                     .fillMaxWidth()
+                    .onSizeChanged { confirmationCardHeight = it.height }
                     .padding(16.dp)
             ) {
                 Column(

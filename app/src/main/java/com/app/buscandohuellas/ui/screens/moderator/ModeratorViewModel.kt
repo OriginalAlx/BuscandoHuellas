@@ -14,6 +14,7 @@ import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import java.time.Instant
@@ -21,6 +22,7 @@ import java.time.LocalDateTime
 import java.time.OffsetDateTime
 import java.time.ZoneOffset
 import java.time.format.DateTimeParseException
+import java.util.Locale
 import javax.inject.Inject
 
 private const val TAG = "ModeratorViewModel"
@@ -65,6 +67,19 @@ class ModeratorViewModel @Inject constructor(
                 val reportedPostsDeferred = async { reportRepository.getReportedPosts() }
 
                 val user = userDeferred.await()
+
+                // El rol se consulta al entrar al panel (justo después del
+                // login en el flujo normal). Si no hay fila o falla la consulta,
+                // el repositorio emite null y se aplica `user` por defecto.
+                val role = user?.id
+                    ?.takeIf { it.isNotBlank() }
+                    ?.let { reportRepository.getUserRole(it).first() }
+                    ?.trim()
+                    ?.lowercase(Locale.ROOT)
+                    ?.takeIf { it in MODERATOR_ROLES }
+                    ?: ROLE_USER
+                Log.d(TAG, "Rol de moderación cargado: $role")
+
                 val reportsResult = reportsDeferred.await()
                 val reportedPostsResult = reportedPostsDeferred.await()
 
@@ -85,13 +100,18 @@ class ModeratorViewModel @Inject constructor(
                             ?.fullName
                             ?.takeIf { it.isNotBlank() }
                             ?: "Moderador",
+                        userRole = role,
                         allReports = reports,
                         reportedPosts = reportedPosts,
                         isLoading = false,
                         isRefreshing = false,
                         reportsLoadError = reportsLoadError,
                         reportedPostsLoadError = reportedPostsLoadError,
-                        errorMessage = reportsLoadError ?: reportedPostsLoadError
+                        errorMessage = if (role !in MODERATOR_ROLES) {
+                            NO_MODERATOR_PERMISSION_MESSAGE
+                        } else {
+                            reportsLoadError ?: reportedPostsLoadError
+                        }
                     )
                 }
             }
@@ -110,6 +130,7 @@ class ModeratorViewModel @Inject constructor(
     }
 
     fun requestEdit(report: Report) {
+        if (denyIfNotModerator() || _uiState.value.isActionLoading) return
         if (report.id.isNullOrBlank()) return
         _uiState.update { it.copy(reportToEdit = report) }
     }
@@ -121,7 +142,7 @@ class ModeratorViewModel @Inject constructor(
 
     fun saveEdit(description: String, status: ReportStatus, reason: String) {
         val currentState = _uiState.value
-        if (currentState.isActionLoading) return
+        if (denyIfNotModerator() || currentState.isActionLoading) return
 
         val report = currentState.reportToEdit ?: return
         val reportId = report.id ?: return
@@ -181,6 +202,7 @@ class ModeratorViewModel @Inject constructor(
     }
 
     fun requestDelete(report: Report) {
+        if (denyIfNotModerator() || _uiState.value.isActionLoading) return
         if (report.id.isNullOrBlank()) return
         _uiState.update { it.copy(reportToDelete = report) }
     }
@@ -192,7 +214,7 @@ class ModeratorViewModel @Inject constructor(
 
     fun confirmDelete() {
         val currentState = _uiState.value
-        if (currentState.isActionLoading) return
+        if (denyIfNotModerator() || currentState.isActionLoading) return
 
         val report = currentState.reportToDelete ?: return
         val reportId = report.id ?: return
@@ -235,7 +257,7 @@ class ModeratorViewModel @Inject constructor(
 
     fun dismissFlags(reportId: String) {
         val currentState = _uiState.value
-        if (currentState.isActionLoading || reportId.isBlank()) return
+        if (denyIfNotModerator() || currentState.isActionLoading || reportId.isBlank()) return
 
         viewModelScope.launch {
             _uiState.update {
@@ -295,6 +317,13 @@ class ModeratorViewModel @Inject constructor(
         _uiState.update { it.copy(errorMessage = null, userMessage = null) }
     }
 
+    /** Bloquea cualquier acción de moderación si el rol cargado no lo permite. */
+    private fun denyIfNotModerator(): Boolean {
+        if (_uiState.value.canModerate) return false
+        _uiState.update { it.copy(errorMessage = NO_MODERATOR_PERMISSION_MESSAGE) }
+        return true
+    }
+
     /**
      * Única fuente de verdad para la lista filtrada y las estadísticas.
      *
@@ -342,5 +371,12 @@ class ModeratorViewModel @Inject constructor(
                 }
             }
         }
+    }
+
+    companion object {
+        private const val ROLE_USER = "user"
+        private val MODERATOR_ROLES = setOf("moderator", "admin")
+        private const val NO_MODERATOR_PERMISSION_MESSAGE =
+            "No tienes permisos de moderador para realizar esta acción."
     }
 }

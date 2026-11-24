@@ -7,10 +7,12 @@ import android.util.Log
 import androidx.lifecycle.SavedStateHandle
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import com.app.buscandohuellas.domain.model.Comment
 import com.app.buscandohuellas.domain.model.Report
 import com.app.buscandohuellas.domain.model.ReportReason
 import com.app.buscandohuellas.domain.model.ReportStatus
 import com.app.buscandohuellas.domain.repository.AuthRepository
+import com.app.buscandohuellas.domain.repository.CommentRepository
 import com.app.buscandohuellas.domain.repository.ReportRepository
 import com.app.buscandohuellas.ui.utils.LocationUtils
 import com.google.android.gms.location.CurrentLocationRequest
@@ -37,6 +39,7 @@ import javax.inject.Inject
 class ReportDetailViewModel @Inject constructor(
     savedStateHandle: SavedStateHandle,
     private val reportRepository: ReportRepository,
+    private val commentRepository: CommentRepository,
     private val authRepository: AuthRepository,
     private val supabaseClient: SupabaseClient
 ) : ViewModel() {
@@ -80,8 +83,7 @@ class ReportDetailViewModel @Inject constructor(
     private var reporterAvatarUrl: String? = null
     private var isOwner: Boolean = false
 
-    private val sightings = mutableListOf<SightingUi>()
-    private var sightingSequence = 0L
+    private var commentsPreview: List<Comment> = emptyList()
 
     init {
         loadReport()
@@ -103,6 +105,7 @@ class ReportDetailViewModel @Inject constructor(
                     _currentUserId.value = currentUserId
                     isOwner = currentUserId == report.userId
                     resolveReporter(report)
+                    loadCommentsPreview(reportId)
                     publishSuccess(report)
                 }
                 .onFailure { error ->
@@ -131,6 +134,7 @@ class ReportDetailViewModel @Inject constructor(
                     _currentUserId.value = currentUserId
                     isOwner = currentUserId == report.userId
                     resolveReporter(report)
+                    loadCommentsPreview(reportId)
                     publishSuccess(report)
                 }
                 .onFailure { error ->
@@ -274,6 +278,21 @@ class ReportDetailViewModel @Inject constructor(
         }
     }
 
+    /** Carga una vista previa de los comentarios persistidos en Supabase. */
+    private suspend fun loadCommentsPreview(reportId: String) {
+        if (reportId.isBlank()) {
+            commentsPreview = emptyList()
+            return
+        }
+
+        commentsPreview = commentRepository.getComments(reportId)
+            .onFailure { error ->
+                Log.w(TAG, "No se pudo cargar la vista previa de comentarios", error)
+            }
+            .getOrElse { emptyList() }
+            .takeLast(COMMENTS_PREVIEW_LIMIT)
+    }
+
     private suspend fun resolveReporter(report: Report) {
         val currentUser = runCatching { authRepository.getCurrentUser() }.getOrNull()
         currentUserName = currentUser?.fullName?.takeIf { it.isNotBlank() }
@@ -297,7 +316,7 @@ class ReportDetailViewModel @Inject constructor(
             relativeTime = formatRelativeTime(report.createdAt),
             userName = reporterName.ifBlank { Report.DEFAULT_USER_NAME },
             userAvatarUrl = reporterAvatarUrl,
-            sightings = sightings.toList()
+            comments = commentsPreview
         )
     }
 
@@ -305,19 +324,28 @@ class ReportDetailViewModel @Inject constructor(
         _sightingInput.value = value.take(MAX_SIGHTING_LENGTH)
     }
 
+    /** Publica el comentario en Supabase y actualiza la vista previa. */
     fun addSighting() {
         val message = _sightingInput.value.trim()
         if (message.isEmpty()) return
 
         val report = loadedReport ?: return
-        sightingSequence += 1
-        sightings += SightingUi(
-            id = sightingSequence,
-            authorName = currentUserName?.takeIf { it.isNotBlank() } ?: "Tú",
-            message = message
-        )
-        _sightingInput.value = ""
-        publishSuccess(report)
+
+        viewModelScope.launch {
+            commentRepository.addComment(reportId, message)
+                .onSuccess { comment ->
+                    _sightingInput.value = ""
+                    commentsPreview = (commentsPreview + comment)
+                        .sortedBy { it.createdAt }
+                        .takeLast(COMMENTS_PREVIEW_LIMIT)
+                    publishSuccess(report)
+                }
+                .onFailure { error ->
+                    Log.e(TAG, "No se pudo publicar el comentario", error)
+                    _snackbarMessage.value = error.message
+                        ?: "No se pudo publicar el comentario. Inténtalo de nuevo."
+                }
+        }
     }
 
     @SuppressLint("MissingPermission")
@@ -382,6 +410,7 @@ class ReportDetailViewModel @Inject constructor(
     companion object {
         private const val TAG = "ReportDetailViewModel"
         private const val MAX_SIGHTING_LENGTH = 280
+        private const val COMMENTS_PREVIEW_LIMIT = 2
         private const val MAX_CUSTOM_REASON_LENGTH = 500
         internal const val NO_LOCATION_LABEL = "Ubicación no disponible"
 

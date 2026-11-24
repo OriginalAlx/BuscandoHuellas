@@ -84,19 +84,20 @@ import java.util.Locale
 @Composable
 fun CreateReportScreen(
     onReportCreated: () -> Unit,
+    onFoundReportCreated: (String) -> Unit = {},
     onNavigateBack: () -> Unit = onReportCreated,
     viewModel: CreateReportViewModel = hiltViewModel()
 ) {
     val uiState by viewModel.uiState.collectAsStateWithLifecycle()
     val petName by viewModel.petName.collectAsStateWithLifecycle()
     val description by viewModel.description.collectAsStateWithLifecycle()
-    val selectedStatus by viewModel.selectedStatus.collectAsStateWithLifecycle()
     val latitude by viewModel.latitude.collectAsStateWithLifecycle()
     val longitude by viewModel.longitude.collectAsStateWithLifecycle()
     val isLocationLoading by viewModel.isLocationLoading.collectAsStateWithLifecycle()
     val selectedImageUris by viewModel.selectedImageUris.collectAsStateWithLifecycle()
     val isUploadingImage by viewModel.isUploadingImage.collectAsStateWithLifecycle()
     val isMapPickerOpen by viewModel.isMapPickerOpen.collectAsStateWithLifecycle()
+    val isLostReport = viewModel.isLostReport
 
     val context = LocalContext.current
     val snackbarHostState = remember { SnackbarHostState() }
@@ -148,14 +149,20 @@ fun CreateReportScreen(
             success.warning?.let { message ->
                 Toast.makeText(context, message, Toast.LENGTH_LONG).show()
             }
-            onReportCreated()
+            if (success.reportType == com.app.buscandohuellas.domain.model.ReportStatus.FOUND) {
+                onFoundReportCreated(success.reportId)
+            } else {
+                onReportCreated()
+            }
         }
     }
 
     
     val errorMessage = (uiState as? CreateReportUiState.Error)?.message
-    LaunchedEffect(errorMessage) {
-        if (errorMessage != null) {
+    LaunchedEffect(errorMessage, isMapPickerOpen) {
+        // Mientras el mapa está abierto, su propio Snackbar muestra el mensaje
+        // de error de ubicación con el texto esperado.
+        if (errorMessage != null && !isMapPickerOpen) {
             snackbarHostState.showSnackbar(errorMessage)
         }
     }
@@ -178,7 +185,9 @@ fun CreateReportScreen(
     Scaffold(
         topBar = {
             TopAppBar(
-                title = { Text("Nuevo Reporte") },
+                title = {
+                    Text(if (isLostReport) "Reportar mascota perdida" else "Reportar mascota encontrada")
+                },
                 navigationIcon = {
                     IconButton(onClick = onNavigateBack) {
                         Icon(imageVector = Icons.Filled.Close, contentDescription = "Cerrar")
@@ -199,7 +208,9 @@ fun CreateReportScreen(
             OutlinedTextField(
                 value = petName,
                 onValueChange = viewModel::onPetNameChange,
-                label = { Text("Nombre de la mascota *") },
+                label = {
+                    Text(if (isLostReport) "Nombre de la mascota *" else "Nombre de la mascota (opcional)")
+                },
                 singleLine = true,
                 enabled = uiState !is CreateReportUiState.Loading,
                 modifier = Modifier.fillMaxWidth()
@@ -213,12 +224,6 @@ fun CreateReportScreen(
                 maxLines = 6,
                 enabled = uiState !is CreateReportUiState.Loading,
                 modifier = Modifier.fillMaxWidth()
-            )
-
-            StatusSelector(
-                selectedStatus = selectedStatus,
-                enabled = uiState !is CreateReportUiState.Loading,
-                onStatusSelected = viewModel::onStatusSelected
             )
 
             LocationSection(
@@ -265,7 +270,7 @@ fun CreateReportScreen(
 
             Button(
                 onClick = viewModel::createReport,
-                enabled = petName.isNotBlank() &&
+                enabled = (!isLostReport || petName.isNotBlank()) &&
                     latitude != null &&
                     longitude != null &&
                     !isUploadingImage &&
@@ -297,6 +302,7 @@ fun CreateReportScreen(
             currentLatitude = latitude,
             currentLongitude = longitude,
             isLocating = isLocationLoading,
+            locationError = errorMessage,
             onUseCurrentLocation = {
                 
                 val locationGranted = ContextCompat.checkSelfPermission(
@@ -315,72 +321,6 @@ fun CreateReportScreen(
             },
             onCancel = { viewModel.closeMapPicker() }
         )
-    }
-}
-
-@Composable
-private fun StatusSelector(
-    selectedStatus: ReportStatus,
-    enabled: Boolean,
-    onStatusSelected: (ReportStatus) -> Unit,
-    modifier: Modifier = Modifier
-) {
-    Column(modifier = modifier.fillMaxWidth()) {
-        Text(
-            text = "Estado del reporte",
-            style = MaterialTheme.typography.titleSmall,
-            fontWeight = FontWeight.SemiBold,
-            color = BrandColors.TextPrimary
-        )
-
-        Spacer(modifier = Modifier.height(8.dp))
-
-        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            ReportStatus.entries.forEach { status ->
-                val selected = status == selectedStatus
-                val shape = RoundedCornerShape(12.dp)
-
-                Column(
-                    modifier = Modifier
-                        .weight(1f)
-                        .height(64.dp)
-                        .clip(shape)
-                        .background(status.backgroundColor)
-                        .border(
-                            width = if (selected) 2.dp else 1.dp,
-                            color = if (selected) {
-                                status.textColor
-                            } else {
-                                status.textColor.copy(alpha = 0.25f)
-                            },
-                            shape = shape
-                        )
-                        .clickable(enabled = enabled) { onStatusSelected(status) }
-                        .padding(horizontal = 8.dp, vertical = 8.dp),
-                    horizontalAlignment = Alignment.CenterHorizontally,
-                    verticalArrangement = Arrangement.Center
-                ) {
-                    if (selected) {
-                        Icon(
-                            imageVector = Icons.Filled.CheckCircle,
-                            contentDescription = "Estado seleccionado",
-                            tint = status.textColor,
-                            modifier = Modifier.size(18.dp)
-                        )
-                        Spacer(modifier = Modifier.height(4.dp))
-                    }
-
-                    Text(
-                        text = status.label,
-                        style = MaterialTheme.typography.labelMedium,
-                        fontWeight = if (selected) FontWeight.Bold else FontWeight.Medium,
-                        color = status.textColor,
-                        textAlign = TextAlign.Center,
-                        maxLines = 1
-                    )
-                }
-            }
-        }
     }
 }
 

@@ -29,6 +29,8 @@ data class BrandPalette(
     val danger: Color,
     val dangerLight: Color,
     val dangerBorder: Color,
+    val badge: Color,
+    val onBadge: Color,
     val warning: Color,
     val warningLight: Color,
     val warningBorder: Color,
@@ -40,6 +42,7 @@ data class BrandPalette(
     val textPrimary: Color,
     val textSecondary: Color,
     val divider: Color,
+    val bubbleIncoming: Color,
     val mapBackground: Color
 )
 
@@ -59,6 +62,8 @@ internal val LightBrandPalette = BrandPalette(
     danger = Color(0xFFDC2626),
     dangerLight = Color(0xFFFEE2E2),
     dangerBorder = Color(0xFFFCA5A5),
+    badge = Color(0xFFEF4444),
+    onBadge = Color(0xFFFFFFFF),
     warning = Color(0xFFF59E0B),
     warningLight = Color(0xFFFFF8E1),
     warningBorder = Color(0xFFFFB74D),
@@ -70,6 +75,7 @@ internal val LightBrandPalette = BrandPalette(
     textPrimary = Color(0xFF1E1F2D),
     textSecondary = Color(0xFF8B8AA3),
     divider = Color(0xFFECEAF3),
+    bubbleIncoming = Color(0xFFF3F4F6),
     mapBackground = Color(0xFFECEEE2)
 )
 
@@ -92,6 +98,8 @@ internal val DarkBrandPalette = BrandPalette(
     danger = Color(0xFFF87171),
     dangerLight = Color(0xFF4A1D1D),
     dangerBorder = Color(0xFF7F1D1D),
+    badge = Color(0xFFEF4444),
+    onBadge = Color(0xFFFFFFFF),
     warning = Color(0xFFFBBF24),
     warningLight = Color(0xFF4A3A12),
     warningBorder = Color(0xFFB45309),
@@ -103,6 +111,7 @@ internal val DarkBrandPalette = BrandPalette(
     textPrimary = Color(0xFFF3F1FA),
     textSecondary = Color(0xFFA9A6BD),
     divider = Color(0xFF2E2E3A),
+    bubbleIncoming = Color(0xFF2E2E3A),
     mapBackground = Color(0xFF23251F)
 )
 
@@ -193,6 +202,17 @@ object BrandColors {
         @ReadOnlyComposable
         get() = LocalBrandPalette.current.dangerBorder
 
+    /** Rojo del badge de alertas no leídas (#EF4444). */
+    val Badge: Color
+        @Composable
+        @ReadOnlyComposable
+        get() = LocalBrandPalette.current.badge
+
+    val OnBadge: Color
+        @Composable
+        @ReadOnlyComposable
+        get() = LocalBrandPalette.current.onBadge
+
     val Warning: Color
         @Composable
         @ReadOnlyComposable
@@ -247,6 +267,12 @@ object BrandColors {
         @Composable
         @ReadOnlyComposable
         get() = LocalBrandPalette.current.divider
+
+    /** Fondo de las burbujas del otro usuario en el chat. */
+    val BubbleIncoming: Color
+        @Composable
+        @ReadOnlyComposable
+        get() = LocalBrandPalette.current.bubbleIncoming
 
     val MapBackground: Color
         @Composable

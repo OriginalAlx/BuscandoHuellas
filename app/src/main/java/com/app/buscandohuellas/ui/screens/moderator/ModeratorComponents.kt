@@ -210,6 +210,7 @@ internal fun CountBadge(count: Int, modifier: Modifier = Modifier) {
 internal fun ModeratorReportCard(
     report: Report,
     isActionLoading: Boolean,
+    canModerate: Boolean,
     onEdit: () -> Unit,
     onDelete: () -> Unit,
     onClick: () -> Unit,
@@ -247,7 +248,7 @@ internal fun ModeratorReportCard(
                     contentDescription = "Editar reporte",
                     background = ModeratorColors.LavenderLight,
                     tint = ModeratorColors.Lavender,
-                    enabled = !isActionLoading,
+                    enabled = canModerate && !isActionLoading,
                     onClick = onEdit
                 )
                 CardIconButton(
@@ -255,7 +256,7 @@ internal fun ModeratorReportCard(
                     contentDescription = "Eliminar reporte",
                     background = ModeratorColors.RedLight,
                     tint = ModeratorColors.Red,
-                    enabled = !isActionLoading,
+                    enabled = canModerate && !isActionLoading,
                     onClick = onDelete
                 )
             }
@@ -267,6 +268,7 @@ internal fun ModeratorReportCard(
 internal fun ReportedPostCard(
     post: ReportedPost,
     isActionLoading: Boolean,
+    canModerate: Boolean,
     onView: () -> Unit,
     onEdit: () -> Unit,
     onDelete: () -> Unit,
@@ -384,7 +386,7 @@ internal fun ReportedPostCard(
                     icon = Icons.Filled.Edit,
                     background = ModeratorColors.LavenderLight,
                     tint = ModeratorColors.Lavender,
-                    enabled = !isActionLoading,
+                    enabled = canModerate && !isActionLoading,
                     onClick = onEdit
                 )
                 CommunityActionButton(
@@ -392,7 +394,7 @@ internal fun ReportedPostCard(
                     icon = Icons.Filled.Delete,
                     background = ModeratorColors.RedLight,
                     tint = ModeratorColors.Red,
-                    enabled = !isActionLoading,
+                    enabled = canModerate && !isActionLoading,
                     onClick = onDelete
                 )
                 CommunityActionButton(
@@ -400,7 +402,7 @@ internal fun ReportedPostCard(
                     icon = Icons.Filled.Check,
                     background = ModeratorColors.GreenLight,
                     tint = ModeratorColors.Green,
-                    enabled = !isActionLoading,
+                    enabled = canModerate && !isActionLoading,
                     onClick = onDismissFlags
                 )
             }

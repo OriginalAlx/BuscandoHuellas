@@ -11,6 +11,7 @@ class ReportStatusTest {
         assertEquals(ReportStatus.LOST, ReportStatus.fromString("lost"))
         assertEquals(ReportStatus.SIGHTED, ReportStatus.fromString(" SIGHTED "))
         assertEquals(ReportStatus.FOUND, ReportStatus.fromString("Found"))
+        assertEquals(ReportStatus.RESOLVED, ReportStatus.fromString(" resolved "))
     }
 
     @Test
@@ -23,8 +24,9 @@ class ReportStatusTest {
     @Test
     fun rotatesThroughStates() {
         assertEquals(ReportStatus.SIGHTED, ReportStatus.LOST.next())
-        assertEquals(ReportStatus.FOUND, ReportStatus.SIGHTED.next())
-        assertEquals(ReportStatus.LOST, ReportStatus.FOUND.next())
+        assertEquals(ReportStatus.RESOLVED, ReportStatus.SIGHTED.next())
+        assertEquals(ReportStatus.RESOLVED, ReportStatus.FOUND.next())
+        assertEquals(ReportStatus.LOST, ReportStatus.RESOLVED.next())
     }
 
     @Test
@@ -32,6 +34,7 @@ class ReportStatusTest {
         assertEquals("PERDIDA", ReportStatus.LOST.label)
         assertEquals("AVISTADA", ReportStatus.SIGHTED.label)
         assertEquals("ENCONTRADA", ReportStatus.FOUND.label)
+        assertEquals("RESUELTA", ReportStatus.RESOLVED.label)
     }
 
     @Test
@@ -50,6 +53,11 @@ class ReportStatusTest {
         assertEquals(Color(0xFFD1FAE5), ReportStatus.FOUND.lightBackgroundColor)
         assertEquals(Color(0xFF34D399), ReportStatus.FOUND.darkTextColor)
         assertEquals(Color(0xFF123B2C), ReportStatus.FOUND.darkBackgroundColor)
+
+        assertEquals(Color(0xFF6D5BD0), ReportStatus.RESOLVED.lightTextColor)
+        assertEquals(Color(0xFFEDE9FE), ReportStatus.RESOLVED.lightBackgroundColor)
+        assertEquals(Color(0xFFC4B5FD), ReportStatus.RESOLVED.darkTextColor)
+        assertEquals(Color(0xFF312E81), ReportStatus.RESOLVED.darkBackgroundColor)
     }
 
     @Test
@@ -57,5 +65,6 @@ class ReportStatusTest {
         assertEquals(0xFFDC2626.toInt(), ReportStatus.LOST.mapColor)
         assertEquals(0xFFEA580C.toInt(), ReportStatus.SIGHTED.mapColor)
         assertEquals(0xFF059669.toInt(), ReportStatus.FOUND.mapColor)
+        assertEquals(0xFF8B7CFF.toInt(), ReportStatus.RESOLVED.mapColor)
     }
 }

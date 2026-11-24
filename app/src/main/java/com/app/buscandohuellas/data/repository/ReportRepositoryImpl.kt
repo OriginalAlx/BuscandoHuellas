@@ -22,6 +22,7 @@ import io.ktor.client.plugins.HttpRequestTimeoutException
 import io.ktor.http.ContentType
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.flow
 import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
@@ -40,13 +41,14 @@ import java.util.UUID
 import javax.inject.Inject
 
 private const val TAG = "ReportRepository"
+private const val BH_DEBUG_TAG = "BH_DEBUG"
 
 class ReportRepositoryImpl @Inject constructor(
     private val supabaseClient: SupabaseClient,
     @ApplicationContext private val context: Context
 ) : ReportRepository {
 
-    override suspend fun createReport(report: Report): Result<Unit> = try {
+    override suspend fun createReport(report: Report): Result<String> = try {
         val userId = supabaseClient.auth.currentUserOrNull()?.id
             ?: return Result.failure(Exception("Usuario no autenticado"))
 
@@ -62,8 +64,10 @@ class ReportRepositoryImpl @Inject constructor(
             includeImageUrls = true
         )
 
-        try {
-            supabaseClient.from("reports").insert(payloadWithImageUrls)
+        val insertedRows = try {
+            supabaseClient.from(REPORTS_TABLE).insert(payloadWithImageUrls) {
+                select(Columns.raw("id"))
+            }.decodeList<JsonObject>()
         } catch (error: Exception) {
             if (imageUrls.isEmpty() || !isMissingImageUrlsColumn(error)) throw error
 
@@ -72,17 +76,28 @@ class ReportRepositoryImpl @Inject constructor(
                 "La columna image_urls no existe en Supabase. " +
                     "Se guardará solo la primera foto hasta aplicar la migración."
             )
-            supabaseClient.from("reports").insert(
+            supabaseClient.from(REPORTS_TABLE).insert(
                 buildReportPayload(
                     report = report,
                     userId = userId,
                     imageUrls = imageUrls,
                     includeImageUrls = false
                 )
-            )
+            ) {
+                select(Columns.raw("id"))
+            }.decodeList<JsonObject>()
         }
 
-        Result.success(Unit)
+        val reportId = insertedRows.firstOrNull()?.get("id")
+            ?.toString()
+            ?.trim('"')
+            .orEmpty()
+
+        if (reportId.isBlank()) {
+            Result.failure(Exception("No se pudo obtener el ID del reporte creado."))
+        } else {
+            Result.success(reportId)
+        }
     } catch (error: CancellationException) {
         throw error
     } catch (error: RestException) {
@@ -484,10 +499,84 @@ class ReportRepositoryImpl @Inject constructor(
         )
     }
 
+    /**
+     * Rol del usuario según `public.user_roles`. Es un Flow frío: cada
+     * colección vuelve a consultar Supabase, así que un cambio de rol se
+     * refleja sin necesidad de cerrar sesión. Ante cualquier error se emite
+     * `null` y la app aplica el rol `user` por defecto (fail-safe).
+     */
+    override fun getUserRole(userId: String): Flow<String?> = flow {
+        if (userId.isBlank()) {
+            Log.w(BH_DEBUG_TAG, "Verificando rol del usuario: (id vacío)")
+            emit(null)
+            return@flow
+        }
+
+        Log.d(BH_DEBUG_TAG, "Verificando rol del usuario: $userId")
+        val role = try {
+            supabaseClient
+                .from(USER_ROLES_TABLE)
+                .select(Columns.raw("role")) {
+                    filter { eq("user_id", userId) }
+                }
+                .decodeList<UserRoleRow>()
+                .firstOrNull()
+                ?.role
+                ?.trim()
+                ?.lowercase(Locale.ROOT)
+                ?.takeIf { it in USER_ROLES }
+        } catch (error: CancellationException) {
+            throw error
+        } catch (error: Exception) {
+            Log.w(BH_DEBUG_TAG, "No se pudo consultar el rol de $userId", error)
+            null
+        }
+
+        Log.d(
+            BH_DEBUG_TAG,
+            if (role == null) "Rol obtenido: $ROLE_USER (por defecto)" else "Rol obtenido: $role"
+        )
+        emit(role)
+    }
+
     override suspend fun deleteReport(reportId: String): Result<Unit> = try {
-        // Si la lectura falla, se continúa: el reporte debe poder eliminarse
-        // aunque ya no se puedan recuperar las URLs de sus imágenes.
-        val imageUrls = getReportById(reportId).getOrNull()?.allImageUrls.orEmpty()
+        Log.d(BH_DEBUG_TAG, "Intentando eliminar reporte: $reportId")
+
+        val currentUserId = supabaseClient.auth.currentUserOrNull()?.id
+            ?: run {
+                Log.e(BH_DEBUG_TAG, "Eliminación fallida: usuario no autenticado")
+                return Result.failure(Exception("Usuario no autenticado."))
+            }
+
+        val role = getUserRole(currentUserId).first() ?: ROLE_USER
+        val isModerator = role == ROLE_MODERATOR || role == ROLE_ADMIN
+
+        // La lectura es best-effort: sirve para recuperar las imágenes y para
+        // distinguir "no existe" de "sin permiso" cuando el usuario es dueño.
+        val existingReport = getReportById(reportId)
+        val report = existingReport.getOrNull()
+        val imageUrls = report?.allImageUrls.orEmpty()
+
+        if (!isModerator) {
+            if (report == null) {
+                val message = if (existingReport.exceptionOrNull()?.message
+                        ?.contains("no existe", ignoreCase = true) == true
+                ) {
+                    REPORT_GONE_MESSAGE
+                } else {
+                    NO_PERMISSION_MESSAGE
+                }
+                Log.e(BH_DEBUG_TAG, "Eliminación fallida: $message")
+                return Result.failure(Exception(message))
+            }
+            if (report.userId != currentUserId) {
+                Log.e(
+                    BH_DEBUG_TAG,
+                    "Eliminación fallida: el usuario $currentUserId no es dueño ni moderador"
+                )
+                return Result.failure(Exception(MODERATOR_PERMISSION_MESSAGE))
+            }
+        }
 
         val deletedRows = supabaseClient
             .from(REPORTS_TABLE)
@@ -500,7 +589,10 @@ class ReportRepositoryImpl @Inject constructor(
             .decodeList<JsonObject>()
 
         if (deletedRows.isEmpty()) {
-            Result.failure(Exception(NO_PERMISSION_MESSAGE))
+            // PostgREST devuelve 0 filas tanto si no existe como si RLS bloquea.
+            val message = if (report == null) REPORT_GONE_MESSAGE else MODERATOR_PERMISSION_MESSAGE
+            Log.e(BH_DEBUG_TAG, "Eliminación fallida: $message")
+            Result.failure(Exception(message))
         } else {
             imageUrls.forEach { imageUrl ->
                 runBestEffort("No se pudo eliminar la imagen $imageUrl") {
@@ -510,18 +602,19 @@ class ReportRepositoryImpl @Inject constructor(
             runBestEffort("No se pudo registrar la acción DELETE") {
                 logModerationAction(reportId, ACTION_DELETE, null)
             }
+            Log.d(BH_DEBUG_TAG, "Eliminación exitosa: $reportId")
             Result.success(Unit)
         }
     } catch (error: CancellationException) {
         throw error
     } catch (error: RestException) {
-        Log.e(TAG, "RestException en deleteReport", error)
+        Log.e(BH_DEBUG_TAG, "Error al eliminar $reportId: ${error.message}", error)
         Result.failure(Exception(moderationRestMessage(error, "eliminar el reporte")))
     } catch (error: HttpRequestException) {
-        Log.e(TAG, "HttpRequestException en deleteReport", error)
-        Result.failure(Exception("No hay conexión a internet. Verifica tu red e intenta de nuevo."))
+        Log.e(BH_DEBUG_TAG, "Error de conexión al eliminar $reportId", error)
+        Result.failure(Exception(CONNECTION_MESSAGE))
     } catch (error: Exception) {
-        Log.e(TAG, "Error inesperado en deleteReport", error)
+        Log.e(BH_DEBUG_TAG, "Error inesperado al eliminar $reportId: ${error.message}", error)
         Result.failure(Exception("No se pudo eliminar el reporte. Inténtalo de nuevo."))
     }
 
@@ -551,7 +644,7 @@ class ReportRepositoryImpl @Inject constructor(
             .decodeList<JsonObject>()
 
         if (updatedRows.isEmpty()) {
-            Result.failure(Exception(NO_PERMISSION_MESSAGE))
+            Result.failure(Exception(MODERATOR_PERMISSION_MESSAGE))
         } else {
             runBestEffort("No se pudieron resolver las denuncias del reporte") {
                 resolveReportFlags(reportId)
@@ -642,7 +735,7 @@ class ReportRepositoryImpl @Inject constructor(
         val updatedRows = updateFlagStatus(reportId, FLAG_STATUS_DISMISSED)
 
         if (updatedRows.isEmpty()) {
-            Result.failure(Exception(NO_PERMISSION_MESSAGE))
+            Result.failure(Exception(MODERATOR_PERMISSION_MESSAGE))
         } else {
             runBestEffort("No se pudo registrar la acción DISMISS") {
                 logModerationAction(reportId, ACTION_DISMISS, null)
@@ -785,7 +878,7 @@ class ReportRepositoryImpl @Inject constructor(
             message.contains("row-level security", ignoreCase = true) ||
                 message.contains("permission denied", ignoreCase = true) ||
                 message.contains("violates row-level", ignoreCase = true) ->
-                NO_PERMISSION_MESSAGE
+                MODERATOR_PERMISSION_MESSAGE
 
             message.contains("does not exist", ignoreCase = true) ||
                 message.contains("could not find", ignoreCase = true) ||
@@ -878,6 +971,97 @@ class ReportRepositoryImpl @Inject constructor(
         }
     }
 
+    override suspend fun getNearbyLostReports(
+        latitude: Double,
+        longitude: Double,
+        radiusKm: Double,
+        maxDays: Int
+    ): Result<List<Report>> = try {
+        val now = Instant.now()
+        val maxAgeMillis = maxDays.toLong() * 24L * 60L * 60L * 1000L
+
+        val reports = selectReportDtos()
+            .map { it.toDomain() }
+            .filter { report ->
+                report.status == ReportStatus.LOST &&
+                    report.latitude != null &&
+                    report.longitude != null
+            }
+            .filter { report ->
+                val created = parseCreatedAt(report.createdAt)
+                created == null || (now.toEpochMilli() - created.toEpochMilli()) <= maxAgeMillis
+            }
+            .mapNotNull { report ->
+                val distance = haversineKm(
+                    latitude,
+                    longitude,
+                    report.latitude!!,
+                    report.longitude!!
+                )
+                if (distance <= radiusKm) report to distance else null
+            }
+            .sortedBy { it.second }
+            .map { it.first }
+
+        Result.success(reports)
+    } catch (error: CancellationException) {
+        throw error
+    } catch (error: HttpRequestException) {
+        Log.e(TAG, "HttpRequestException en getNearbyLostReports", error)
+        Result.failure(Exception("No hay conexión a internet. Verifica tu red e intenta de nuevo."))
+    } catch (error: RestException) {
+        Log.e(TAG, "RestException en getNearbyLostReports", error)
+        Result.failure(Exception(friendlyMessage(error)))
+    } catch (error: Exception) {
+        Log.e(TAG, "Error inesperado en getNearbyLostReports", error)
+        Result.failure(Exception(error.message ?: "No se pudieron cargar reportes cercanos."))
+    }
+
+    override suspend fun createReportMatch(
+        foundReportId: String,
+        lostReportId: String,
+        similarityScore: Float
+    ): Result<Unit> = try {
+        val userId = supabaseClient.auth.currentUserOrNull()?.id
+            ?: return Result.failure(Exception("Usuario no autenticado"))
+
+        supabaseClient.from(REPORT_MATCHES_TABLE).insert(
+            buildJsonObject {
+                put("found_report_id", foundReportId)
+                put("lost_report_id", lostReportId)
+                put("matched_by", userId)
+                put("similarity_score", similarityScore.toDouble())
+            }
+        )
+        Result.success(Unit)
+    } catch (error: CancellationException) {
+        throw error
+    } catch (error: HttpRequestException) {
+        Log.e(TAG, "HttpRequestException en createReportMatch", error)
+        Result.failure(Exception("No hay conexión a internet. Verifica tu red e intenta de nuevo."))
+    } catch (error: RestException) {
+        Log.e(TAG, "RestException en createReportMatch", error)
+        Result.failure(Exception("No se pudo registrar la coincidencia."))
+    } catch (error: Exception) {
+        Log.e(TAG, "Error inesperado en createReportMatch", error)
+        Result.failure(Exception(error.message ?: "No se pudo registrar la coincidencia."))
+    }
+
+    private fun haversineKm(
+        lat1: Double,
+        lon1: Double,
+        lat2: Double,
+        lon2: Double
+    ): Double {
+        val earthRadiusKm = 6371.0
+        val dLat = Math.toRadians(lat2 - lat1)
+        val dLon = Math.toRadians(lon2 - lon1)
+        val a = kotlin.math.sin(dLat / 2) * kotlin.math.sin(dLat / 2) +
+            kotlin.math.cos(Math.toRadians(lat1)) * kotlin.math.cos(Math.toRadians(lat2)) *
+            kotlin.math.sin(dLon / 2) * kotlin.math.sin(dLon / 2)
+        return earthRadiusKm * 2 * kotlin.math.atan2(kotlin.math.sqrt(a), kotlin.math.sqrt(1 - a))
+    }
+
     companion object {
         private const val BUCKET_NAME = "pet-reports"
         private const val MAX_IMAGE_SIZE_BYTES = 5 * 1024 * 1024
@@ -885,8 +1069,10 @@ class ReportRepositoryImpl @Inject constructor(
         private const val REPORTS_TABLE = "reports"
         private const val REPORTS_VIEW = "reports_view"
         private const val REPORT_FLAGS_TABLE = "report_flags"
+        private const val REPORT_MATCHES_TABLE = "report_matches"
         private const val PROFILES_TABLE = "profiles"
         private const val MODERATION_LOGS_TABLE = "moderation_logs"
+        private const val USER_ROLES_TABLE = "user_roles"
 
         private const val FLAG_STATUS_PENDING = "PENDING"
         private const val FLAG_STATUS_DISMISSED = "DISMISSED"
@@ -898,8 +1084,17 @@ class ReportRepositoryImpl @Inject constructor(
 
         private val MODERATION_ACTIONS = setOf(ACTION_EDIT, ACTION_DELETE, ACTION_DISMISS)
 
+        private const val ROLE_USER = "user"
+        private const val ROLE_MODERATOR = "moderator"
+        private const val ROLE_ADMIN = "admin"
+        private val USER_ROLES = setOf(ROLE_USER, ROLE_MODERATOR, ROLE_ADMIN)
+
         private const val NO_PERMISSION_MESSAGE =
             "No tienes permiso o el reporte ya no existe."
+        private const val MODERATOR_PERMISSION_MESSAGE =
+            "No tienes permisos para realizar esta acción. Contacta al administrador."
+        private const val REPORT_GONE_MESSAGE = "El reporte ya fue eliminado."
+        private const val CONNECTION_MESSAGE = "Error de conexión, intenta nuevamente."
 
         /**
          * `profiles(...)` usa la relación PostgREST creada por la FK
@@ -930,4 +1125,9 @@ private data class ReportFlagRow(
 private data class ReporterProfileRow(
     @SerialName("id") val id: String? = null,
     @SerialName("full_name") val fullName: String? = null
+)
+
+@Serializable
+private data class UserRoleRow(
+    @SerialName("role") val role: String? = null
 )

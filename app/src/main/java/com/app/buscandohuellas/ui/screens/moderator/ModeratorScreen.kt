@@ -51,7 +51,9 @@ fun ModeratorScreen(
     val snackbarHostState = remember { SnackbarHostState() }
 
     LaunchedEffect(uiState.errorMessage, uiState.userMessage) {
-        val message = uiState.errorMessage ?: uiState.userMessage ?: return@LaunchedEffect
+        val message = friendlyModerationError(uiState.errorMessage)
+            ?: uiState.userMessage
+            ?: return@LaunchedEffect
         snackbarHostState.showSnackbar(message)
         viewModel.clearMessages()
     }
@@ -126,6 +128,15 @@ fun ModeratorScreen(
                         reportedCount = uiState.reportedPosts.size,
                         onTabSelected = viewModel::selectTab
                     )
+
+                    if (!uiState.canModerate) {
+                        Text(
+                            text = "No tienes permisos de moderador. Puedes ver los reportes, pero no editarlos ni eliminarlos.",
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = MaterialTheme.colorScheme.error,
+                            modifier = Modifier.padding(horizontal = 20.dp, vertical = 8.dp)
+                        )
+                    }
 
                     Box(modifier = Modifier.weight(1f)) {
                         when (uiState.selectedTab) {
@@ -268,5 +279,34 @@ private fun TabTitle(
             style = titleStyle,
             maxLines = 2
         )
+    }
+}
+
+/**
+ * Los errores ya llegan claros desde el repositorio; esta capa los normaliza
+ * por si llega un mensaje crudo de PostgREST o una excepción de red.
+ */
+private fun friendlyModerationError(raw: String?): String? {
+    val message = raw?.trim().orEmpty()
+    if (message.isBlank()) return null
+
+    return when {
+        message.contains("row-level security", ignoreCase = true) ||
+            message.contains("permission denied", ignoreCase = true) ||
+            message.contains("permiso", ignoreCase = true) ||
+            message.contains("administrador", ignoreCase = true) ->
+            "No tienes permisos para realizar esta acción"
+
+        message.contains("no existe", ignoreCase = true) ||
+            message.contains("ya fue eliminado", ignoreCase = true) ||
+            message.contains("fue eliminado", ignoreCase = true) ->
+            "El reporte ya fue eliminado"
+
+        message.contains("conexión", ignoreCase = true) ||
+            message.contains("internet", ignoreCase = true) ||
+            message.contains("sin red", ignoreCase = true) ->
+            "Error de conexión, intenta nuevamente"
+
+        else -> message
     }
 }

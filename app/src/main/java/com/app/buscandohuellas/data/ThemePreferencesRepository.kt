@@ -60,6 +60,11 @@ class ThemePreferencesRepository @Inject constructor(
         }
     }
 
+    /** Borra el tema guardado (vuelve al modo Automático). */
+    suspend fun clear() {
+        dataStore.edit { stored -> stored.clear() }
+    }
+
     private object Keys {
         val APP_THEME = stringPreferencesKey("app_theme")
     }

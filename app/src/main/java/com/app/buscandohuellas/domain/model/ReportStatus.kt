@@ -47,15 +47,26 @@ enum class ReportStatus(
         darkTextColor = Color(0xFF34D399),
         darkBackgroundColor = Color(0xFF123B2C),
         mapColor = 0xFF059669.toInt()
+    ),
+    RESOLVED(
+        value = "RESOLVED",
+        label = "RESUELTA",
+        lightTextColor = Color(0xFF6D5BD0),
+        lightBackgroundColor = Color(0xFFEDE9FE),
+        darkTextColor = Color(0xFFC4B5FD),
+        darkBackgroundColor = Color(0xFF312E81),
+        mapColor = 0xFF8B7CFF.toInt()
     );
 
     /**
-     * Siguiente estado en el ciclo PERDIDA → AVISTADA → ENCONTRADA → PERDIDA.
+     * Siguiente estado del ciclo de resolución:
+     * PERDIDA → AVISTADA → RESUELTA (o ENCONTRADA → RESUELTA).
      */
     fun next(): ReportStatus = when (this) {
         LOST -> SIGHTED
-        SIGHTED -> FOUND
-        FOUND -> LOST
+        SIGHTED -> RESOLVED
+        FOUND -> RESOLVED
+        RESOLVED -> LOST
     }
 
     companion object {

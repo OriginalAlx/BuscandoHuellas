@@ -79,5 +79,7 @@ data class NotificationPreferences(
         ReportStatus.LOST -> notifyLost
         ReportStatus.SIGHTED -> notifySighted
         ReportStatus.FOUND -> notifyFound
+        // Un reporte resuelto ya no debe generar alertas de reporte nuevo.
+        ReportStatus.RESOLVED -> false
     }
 }

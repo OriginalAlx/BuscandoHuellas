@@ -1,5 +1,6 @@
 package com.app.buscandohuellas.ui.screens.reportDetail
 
+import com.app.buscandohuellas.domain.model.Comment
 import com.app.buscandohuellas.domain.model.Report
 
 /**
@@ -16,19 +17,9 @@ sealed interface DetailUiState {
         val relativeTime: String = "",
         val userName: String = Report.DEFAULT_USER_NAME,
         val userAvatarUrl: String? = null,
-        val sightings: List<SightingUi> = emptyList()
+        /** Últimos comentarios persistidos, usados como vista previa. */
+        val comments: List<Comment> = emptyList()
     ) : DetailUiState
 
     data class Error(val message: String) : DetailUiState
 }
-
-/**
- * Avistamiento mostrado en la sección de comentarios. Se mantiene en memoria
- * porque el backend todavía no expone una tabla de comentarios.
- */
-data class SightingUi(
-    val id: Long,
-    val authorName: String,
-    val authorAvatarUrl: String? = null,
-    val message: String
-)

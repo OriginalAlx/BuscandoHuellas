@@ -18,6 +18,13 @@ data class NotificationSettingsUiState(
     val message: String? = null,
     val errorMessage: String? = null
 ) {
+    /**
+     * Nombre explícito de la preferencia que controla la tarjeta superior.
+     * La UI usa esta propiedad para decidir si la tarjeta se renderiza.
+     */
+    val notificationsEnabled: Boolean
+        get() = enabled
+
     /** El banner de permisos solo se muestra si falta alguno. */
     val showPermissionBanner: Boolean
         get() = !hasLocationPermission || !hasNotificationPermission

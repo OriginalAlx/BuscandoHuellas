@@ -1,6 +1,9 @@
 package com.app.buscandohuellas.ui.screens.home
 
 import android.Manifest
+import android.app.Activity
+import android.content.Context
+import android.content.ContextWrapper
 import android.content.Intent
 import android.content.pm.PackageManager
 import android.content.res.Resources
@@ -10,7 +13,9 @@ import android.graphics.Color
 import android.graphics.Paint
 import android.graphics.Path
 import android.graphics.drawable.Drawable
+import android.location.LocationManager
 import android.net.Uri
+import android.os.Build
 import android.provider.Settings
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
@@ -54,6 +59,8 @@ import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Scaffold
+import androidx.compose.material3.SnackbarHost
+import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
@@ -62,10 +69,12 @@ import androidx.compose.material3.pulltorefresh.PullToRefreshDefaults
 import androidx.compose.material3.pulltorefresh.pullToRefresh
 import androidx.compose.material3.pulltorefresh.rememberPullToRefreshState
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -78,15 +87,21 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.viewinterop.AndroidView
+import androidx.core.app.ActivityCompat
 import androidx.core.content.ContextCompat
 import androidx.core.graphics.createBitmap
 import androidx.core.graphics.drawable.toDrawable
 import androidx.core.graphics.withRotation
 import androidx.hilt.lifecycle.viewmodel.compose.hiltViewModel
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.LifecycleEventObserver
+import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.app.buscandohuellas.domain.model.Report
 import com.app.buscandohuellas.domain.model.ReportStatus
 import com.app.buscandohuellas.ui.theme.BrandColors
+import com.app.buscandohuellas.ui.utils.RuntimePermissionRequestTracker
+import kotlinx.coroutines.launch
 import org.osmdroid.config.Configuration
 import org.osmdroid.tileprovider.tilesource.TileSourceFactory
 import org.osmdroid.util.GeoPoint
@@ -99,6 +114,7 @@ fun HomeScreen(
     onNavigateToCreateReport: () -> Unit,
     selectedTab: HomeTab = HomeTab.HOME,
     onTabSelected: (HomeTab) -> Unit = {},
+    onAlertsClick: () -> Unit = {},
     onReportClick: (String) -> Unit = {},
     onProfileClick: () -> Unit = {},
     onMyReportsClick: (String) -> Unit = {},
@@ -146,6 +162,29 @@ fun HomeScreen(
     }
 
     val context = LocalContext.current
+    val lifecycleOwner = LocalLifecycleOwner.current
+    val snackbarHostState = remember { SnackbarHostState() }
+    val coroutineScope = rememberCoroutineScope()
+
+    /** Texto del diálogo cuando el usuario marcó "No volver a preguntar". */
+    var showPermissionDialog by remember { mutableStateOf<String?>(null) }
+
+    /** true cuando el GPS o la red del dispositivo pueden dar ubicación. */
+    var showGpsDialog by remember { mutableStateOf(false) }
+
+    /**
+     * El permiso de la app y el interruptor de ubicación del sistema son cosas
+     * distintas. Cerrar sesión no revoca el permiso (es una decisión de Android),
+     * así que al volver a entrar hay que comprobar también que el GPS esté activo.
+     */
+    fun isLocationServicesEnabled(): Boolean {
+        val manager = context.getSystemService(Context.LOCATION_SERVICE) as? LocationManager
+            ?: return false
+        return runCatching {
+            manager.isProviderEnabled(LocationManager.GPS_PROVIDER) ||
+                    manager.isProviderEnabled(LocationManager.NETWORK_PROVIDER)
+        }.getOrDefault(false)
+    }
 
     fun hasLocationPermissionNow(): Boolean =
         ContextCompat.checkSelfPermission(
@@ -157,12 +196,148 @@ fun HomeScreen(
                     Manifest.permission.ACCESS_COARSE_LOCATION
                 ) == PackageManager.PERMISSION_GRANTED
 
+    fun hasNotificationPermissionNow(): Boolean =
+        Build.VERSION.SDK_INT < Build.VERSION_CODES.TIRAMISU ||
+                ContextCompat.checkSelfPermission(
+                    context,
+                    Manifest.permission.POST_NOTIFICATIONS
+                ) == PackageManager.PERMISSION_GRANTED
+
+    fun isPermanentlyDenied(permission: String): Boolean {
+        val activity = context.findActivity() ?: return false
+        return !ActivityCompat.shouldShowRequestPermissionRationale(activity, permission)
+    }
+
+    val runtimePermissionsLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.RequestMultiplePermissions()
+    ) { result ->
+        val locationGranted = result[Manifest.permission.ACCESS_FINE_LOCATION] == true ||
+                result[Manifest.permission.ACCESS_COARSE_LOCATION] == true ||
+                hasLocationPermissionNow()
+        val notificationsGranted = Build.VERSION.SDK_INT < Build.VERSION_CODES.TIRAMISU ||
+                result[Manifest.permission.POST_NOTIFICATIONS] == true ||
+                hasNotificationPermissionNow()
+
+        if (locationGranted) {
+            viewModel.syncLocationPermission(true)
+            if (isLocationServicesEnabled()) {
+                viewModel.getCurrentLocation(context)
+            } else {
+                // Permiso concedido pero GPS apagado: pedir que lo active.
+                showGpsDialog = true
+            }
+        } else {
+            viewModel.syncLocationPermission(false)
+        }
+
+        val locationPermanentlyDenied = !locationGranted &&
+                isPermanentlyDenied(Manifest.permission.ACCESS_FINE_LOCATION)
+        val notificationsPermanentlyDenied = !notificationsGranted &&
+                Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU &&
+                isPermanentlyDenied(Manifest.permission.POST_NOTIFICATIONS)
+
+        val message = buildString {
+            if (!locationGranted) {
+                append("Necesitamos permisos de ubicación para mostrarte reportes cercanos.")
+            }
+            if (!notificationsGranted) {
+                if (isNotEmpty()) append(" ")
+                append("Necesitamos permisos de notificaciones para avisarte de nuevos reportes.")
+            }
+        }
+        if (message.isNotBlank()) {
+            coroutineScope.launch { snackbarHostState.showSnackbar(message) }
+        }
+
+        if (locationPermanentlyDenied || notificationsPermanentlyDenied) {
+            showPermissionDialog = buildString {
+                append("Algunos permisos están desactivados para esta app.")
+                if (locationPermanentlyDenied) {
+                    append(" Ve a Ajustes → Aplicaciones → Buscando Huellas → Permisos y habilita Ubicación.")
+                }
+                if (notificationsPermanentlyDenied) {
+                    append(" En el mismo lugar habilita Notificaciones para recibir alertas.")
+                }
+            }
+        }
+    }
+
+    // Al entrar se verifican los permisos Y el GPS del dispositivo. Si el permiso
+    // ya está concedido pero el usuario apagó la ubicación, Android NO vuelve a
+    // mostrar el diálogo de permisos: hay que pedirle explícitamente que active
+    // el GPS desde Ajustes.
     LaunchedEffect(Unit) {
-        val granted = hasLocationPermissionNow()
-        viewModel.syncLocationPermission(granted)
-        if (granted) {
+        val locationGranted = hasLocationPermissionNow()
+        val gpsEnabled = isLocationServicesEnabled()
+        val notificationsGranted = hasNotificationPermissionNow()
+
+        viewModel.syncLocationPermission(locationGranted)
+        if (locationGranted && gpsEnabled) {
             viewModel.getCurrentLocation(context)
         }
+
+        val needLocation = !locationGranted &&
+                !RuntimePermissionRequestTracker.locationRequested
+        val needNotifications = !notificationsGranted &&
+                Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU &&
+                !RuntimePermissionRequestTracker.notificationsRequested
+
+        if (!needLocation && !needNotifications) {
+            if (locationGranted && !gpsEnabled) {
+                showGpsDialog = true
+            }
+            return@LaunchedEffect
+        }
+
+        // Nunca se lanza un permiso si la Activity está en segundo plano.
+        val activity = context.findActivity()
+        if (activity == null ||
+            !lifecycleOwner.lifecycle.currentState.isAtLeast(Lifecycle.State.STARTED)
+        ) {
+            if (locationGranted && !gpsEnabled) showGpsDialog = true
+            return@LaunchedEffect
+        }
+
+        val permissions = buildList {
+            if (needLocation) {
+                add(Manifest.permission.ACCESS_FINE_LOCATION)
+                add(Manifest.permission.ACCESS_COARSE_LOCATION)
+            }
+            if (needNotifications) {
+                add(Manifest.permission.POST_NOTIFICATIONS)
+            }
+        }
+
+        if (needLocation) RuntimePermissionRequestTracker.markLocationRequested()
+        if (needNotifications) RuntimePermissionRequestTracker.markNotificationsRequested()
+
+        runtimePermissionsLauncher.launch(permissions.toTypedArray())
+
+        // Si el permiso ya estaba concedido, no habrá diálogo nativo: mostramos
+        // directamente el aviso del GPS apagado.
+        if (locationGranted && !gpsEnabled) {
+            showGpsDialog = true
+        }
+    }
+
+    // Al volver de Ajustes (o al reanudar la app) se reevalúa el GPS para cerrar
+    // el aviso en cuanto el usuario lo haya activado.
+    DisposableEffect(lifecycleOwner) {
+        val observer = LifecycleEventObserver { _, event ->
+            if (event != Lifecycle.Event.ON_RESUME) return@LifecycleEventObserver
+
+            if (!isLocationServicesEnabled()) {
+                showGpsDialog = true
+            } else {
+                showGpsDialog = false
+                if (hasLocationPermissionNow()) {
+                    viewModel.syncLocationPermission(true)
+                    viewModel.getCurrentLocation(context)
+                }
+            }
+        }
+        lifecycleOwner.lifecycle.addObserver(observer)
+        onDispose { lifecycleOwner.lifecycle.removeObserver(observer) }
     }
 
     val locationPermissionLauncher = rememberLauncherForActivityResult(
@@ -172,6 +347,7 @@ fun HomeScreen(
     }
 
     val requestLocationPermission: () -> Unit = {
+        RuntimePermissionRequestTracker.markLocationRequested()
         if (hasLocationPermissionNow()) {
             viewModel.onLocationPermissionResult(true, context)
         } else {
@@ -181,14 +357,18 @@ fun HomeScreen(
 
     Scaffold(
         topBar = {
-            HomeTopBar(
-                selectedTab = selectedTab,
-                unreadAlerts = uiState.unreadAlertsCount,
-                initials = uiState.profile.initials,
-                avatarUrl = uiState.profile.avatarUrl,
-                onNotificationsClick = { selectTab(HomeTab.ALERTS) },
-                onProfileClick = onProfileClick
-            )
+            // En la pestaña Mapa no se muestra ninguna barra superior: el mapa
+            // ocupa todo el alto hasta el BottomBar (que vive en AppNavHost).
+            if (selectedTab != HomeTab.MAP) {
+                HomeTopBar(
+                    selectedTab = selectedTab,
+                    unreadAlerts = uiState.unreadAlertsCount,
+                    initials = uiState.profile.initials,
+                    avatarUrl = uiState.profile.avatarUrl,
+                    onNotificationsClick = onAlertsClick,
+                    onProfileClick = onProfileClick
+                )
+            }
         },
         floatingActionButton = {
             if (selectedTab == HomeTab.MAP) {
@@ -196,6 +376,7 @@ fun HomeScreen(
             }
         },
         floatingActionButtonPosition = FabPosition.Center,
+        snackbarHost = { SnackbarHost(snackbarHostState) },
         // La barra inferior vive en AppNavHost; aquí no se consume el inset
         // inferior para no duplicar el espacio reservado.
         contentWindowInsets = WindowInsets(0, 0, 0, 0),
@@ -218,7 +399,7 @@ fun HomeScreen(
                     isRefreshing = isRefreshing,
                     onRefresh = viewModel::refreshReports,
                     onReportClick = onReportClick,
-                    onAlertsBannerClick = { selectTab(HomeTab.ALERTS) },
+                    onAlertsBannerClick = onAlertsClick,
                     onSeeAllReportsClick = { selectTab(HomeTab.MAP) }
                 )
 
@@ -285,6 +466,63 @@ fun HomeScreen(
             },
             dismissButton = {
                 TextButton(onClick = viewModel::dismissPermissionDialog) {
+                    Text("Cancelar")
+                }
+            }
+        )
+    }
+
+    if (showGpsDialog) {
+        AlertDialog(
+            onDismissRequest = { showGpsDialog = false },
+            title = { Text("Ubicación desactivada") },
+            text = {
+                Text(
+                    "Tu GPS está apagado. Activa la ubicación del dispositivo para " +
+                            "ver reportes cercanos y usar el mapa."
+                )
+            },
+            confirmButton = {
+                TextButton(
+                    onClick = {
+                        showGpsDialog = false
+                        val intent = Intent(Settings.ACTION_LOCATION_SOURCE_SETTINGS)
+                            .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                        runCatching { context.startActivity(intent) }
+                    }
+                ) {
+                    Text("Activar ubicación")
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { showGpsDialog = false }) {
+                    Text("Ahora no")
+                }
+            }
+        )
+    }
+
+    showPermissionDialog?.let { dialogText ->
+        AlertDialog(
+            onDismissRequest = { showPermissionDialog = null },
+            title = { Text("Activa los permisos desde Ajustes") },
+            text = { Text(dialogText) },
+            confirmButton = {
+                TextButton(
+                    onClick = {
+                        showPermissionDialog = null
+                        val intent = Intent(
+                            Settings.ACTION_APPLICATION_DETAILS_SETTINGS,
+                            Uri.fromParts("package", context.packageName, null)
+                        ).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                        context.startActivity(intent)
+                    }
+                ) {
+                    Text("Abrir configuración")
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { showPermissionDialog = null }) {
                     Text("Cancelar")
                 }
             }
@@ -1019,4 +1257,11 @@ private fun MapContentPreview() {
             onReportClick = {}
         )
     }
+}
+
+/** Busca la Activity anclada al contexto de Compose. */
+private tailrec fun Context.findActivity(): Activity? = when (this) {
+    is Activity -> this
+    is ContextWrapper -> baseContext.findActivity()
+    else -> null
 }

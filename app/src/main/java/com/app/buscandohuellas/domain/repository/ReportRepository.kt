@@ -10,7 +10,7 @@ import kotlinx.coroutines.flow.Flow
 
 interface ReportRepository {
 
-    suspend fun createReport(report: Report): Result<Unit>
+    suspend fun createReport(report: Report): Result<String>
 
     suspend fun uploadReportImages(uris: List<Uri>): Result<ReportImageUploadResult>
 
@@ -42,6 +42,14 @@ interface ReportRepository {
     suspend fun deleteReport(reportId: String): Result<Unit>
 
     /**
+     * Rol del usuario en `public.user_roles`: `user`, `moderator` o `admin`.
+     *
+     * Emite `null` si el usuario no tiene fila o si la consulta falla; en ese
+     * caso la app aplica el rol `user` por defecto (fail-safe).
+     */
+    fun getUserRole(userId: String): Flow<String?>
+
+    /**
      * Actualiza descripción y estado en un único UPDATE.
      *
      * [reason] es opcional y solo se usa para la bitácora de moderación.
@@ -67,5 +75,20 @@ interface ReportRepository {
         reportId: String,
         action: String,
         reason: String?
+    ): Result<Unit>
+
+    /** Reportes LOST cercanos para emparejamiento de un reporte FOUND. */
+    suspend fun getNearbyLostReports(
+        latitude: Double,
+        longitude: Double,
+        radiusKm: Double = 10.0,
+        maxDays: Int = 7
+    ): Result<List<Report>>
+
+    /** Registra una coincidencia entre reporte FOUND y LOST. */
+    suspend fun createReportMatch(
+        foundReportId: String,
+        lostReportId: String,
+        similarityScore: Float
     ): Result<Unit>
 }
